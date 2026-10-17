@@ -1,0 +1,7 @@
+node_modules
+dist
+coverage
+.dev-home
+pnpm-lock.yaml
+SPEC.md
+SPRINT-*.md

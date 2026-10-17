@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.dev-home/
+*.log
+logs/
+.vite/
+*.md

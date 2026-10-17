@@ -1,0 +1,23 @@
+{
+  "name": "@mcpier/test-fixtures",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Fake MCP servers (stdio, stateless HTTP, legacy-session HTTP) used by tests.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@hono/node-server": "2.1.5",
+    "@modelcontextprotocol/client": "2.3.1",
+    "@modelcontextprotocol/server": "2.3.1",
+    "hono": "4.13.13",
+    "zod": "4.6.7"
+  }
+}

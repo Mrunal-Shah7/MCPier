@@ -1,0 +1,34 @@
+{
+  "name": "@mcpier/core",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The MCPier gateway process: admin API, data directory, platform layer.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@hono/node-server": "2.1.5",
+    "@mcpier/shared": "workspace:*",
+    "@modelcontextprotocol/client": "2.3.1",
+    "@modelcontextprotocol/server": "2.3.1",
+    "@napi-rs/keyring": "2.1.1",
+    "ajv": "8.20.0",
+    "better-sqlite3": "13.0.3",
+    "cross-spawn": "7.0.6",
+    "hono": "4.13.13",
+    "minisearch": "7.2.0",
+    "pino": "10.4.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
+    "@types/cross-spawn": "6.0.6"
+  }
+}

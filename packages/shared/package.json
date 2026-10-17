@@ -1,0 +1,19 @@
+{
+  "name": "@mcpier/shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Types and zod schemas shared by core, cli and web.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "zod": "4.6.7"
+  }
+}

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import type { Context, Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import {
@@ -9,10 +10,12 @@ import {
   ImportRequestSchema,
   jsonErrorMessage,
   parseImportBlock,
+  planClientSecrets,
   referencedSecretNames,
   secretHint,
   SetSecretRequestSchema,
   splitFullToolName,
+  unknownEntryKeys,
   validateConfig,
   type ApiErrorCode,
   type ImportCandidate,
@@ -25,6 +28,7 @@ import {
   type ServerListResponse,
   type ServerLogResponse,
   type ServerRemovedResponse,
+  type ServerReplaceResponse,
   type ServerResponse,
   type ToolCallResponse,
   type ToolListResponse,
@@ -175,7 +179,13 @@ export async function rawToolCall(
     >;
     const kind: CallOutcomeKind =
       outcome.kind === 'input_required' ? 'input_required' : outcome.result.isError ? 'tool_error' : 'ok';
-    record(kind, result);
+    // A tool error keeps its first text block as the error text, as call_tool records it.
+    const errorText =
+      kind === 'tool_error' && outcome.kind === 'result'
+        ? (outcome.result.content.find((block) => block.type === 'text') as { text?: string } | undefined)
+            ?.text
+        : undefined;
+    record(kind, result, errorText);
     return { ok: true, outcome: kind, result, durationMs: outcome.durationMs };
   } catch (error) {
     if (error instanceof NotFoundError) return refused('not_found', error);
@@ -271,6 +281,35 @@ export function registerApiRoutes(app: Hono, services: AppServices, logger: Logg
     return c.json({ server: manager.summary(name) } satisfies ServerResponse);
   });
 
+  // The JSON editor: the whole entry replaces the stored one (keys left out are removed).
+  app.put('/api/servers/:name', async (c) => {
+    const name = c.req.param('name');
+    requireServer(name);
+    const body = await readJson(c);
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      throw new InvalidRequestError('The body must be the whole server entry, as a JSON object.');
+    }
+    const entry = body as Record<string, unknown>;
+    if (entry.name !== name) {
+      throw new InvalidRequestError('The server entry is invalid.', [
+        `name: must stay "${name}"; a server cannot be renamed here (remove it and add it again)`,
+      ]);
+    }
+    // The same checks as adding a server: a plain oauth.clientSecret is refused there too.
+    validateEntry(entry);
+    let index = -1;
+    await config
+      .update((draft) => {
+        index = serverIndex(draft, name);
+        draft.servers[index] = entry as unknown as McpierConfig['servers'][number];
+      })
+      .catch((error: unknown) => entryProblems(error, index));
+    return c.json({
+      server: manager.summary(name),
+      warnings: unknownEntryKeys(entry).map((key) => `${key}: not used by MCPier`),
+    } satisfies ServerReplaceResponse);
+  });
+
   app.delete('/api/servers/:name', async (c) => {
     const name = c.req.param('name');
     await config.update((draft) => {
@@ -336,6 +375,44 @@ export function registerApiRoutes(app: Hono, services: AppServices, logger: Logg
     });
   });
 
+  // ---- Icons: the cached logo, served by the gateway itself (the CSP's img-src 'self' allows it).
+
+  app.get('/api/servers/:name/icon', (c) => {
+    const name = c.req.param('name');
+    requireServer(name);
+    const theme = c.req.query('theme');
+    if (theme !== undefined && theme !== 'light' && theme !== 'dark') {
+      throw new InvalidRequestError('"theme" must be "light" or "dark".');
+    }
+    const file = services.icons.file(name, theme);
+    if (!file) throw new NotFoundError(`No icon for "${name}".`);
+    const headers: Record<string, string> = {
+      'content-type': file.contentType,
+      'x-content-type-options': 'nosniff',
+      'cache-control': 'private, max-age=86400',
+      etag: file.etag,
+    };
+    // An SVG opened on its own can never run script in MCPier's origin.
+    if (file.contentType === 'image/svg+xml') {
+      headers['content-security-policy'] = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+    }
+    if (c.req.header('if-none-match') === file.etag) return c.body(null, 304, headers);
+    let bytes: Buffer;
+    try {
+      bytes = readFileSync(file.path);
+    } catch {
+      throw new NotFoundError(`No icon for "${name}".`);
+    }
+    return c.body(new Uint8Array(bytes), 200, headers);
+  });
+
+  app.post('/api/servers/:name/icon/refresh', async (c) => {
+    const name = c.req.param('name');
+    requireServer(name);
+    await services.icons.refresh(manager.entry(name), manager.serverInfo(name));
+    return c.json({ server: manager.summary(name) } satisfies ServerResponse);
+  });
+
   // ---- Import
 
   app.post('/api/import', async (c) => {
@@ -354,6 +431,10 @@ export function registerApiRoutes(app: Hono, services: AppServices, logger: Logg
       source,
       config.config.servers.map((server) => server.name),
     );
+    // A plain OAuth client secret always becomes a secret (D-031): named now, stored below.
+    const { moves } = planClientSecrets(parsed, await secrets.listNames(), {
+      keepSecrets: request.data.keepSecrets === true,
+    });
     const entries: ImportCandidate[] = [];
     const errors = [...parsed.errors];
     for (const candidate of parsed.candidates) {
@@ -368,10 +449,26 @@ export function registerApiRoutes(app: Hono, services: AppServices, logger: Logg
     }
     const dryRun = request.data.dryRun === true;
     if (!dryRun && entries.length > 0) {
-      await config.update((draft) => {
-        for (const candidate of entries)
-          draft.servers.push(candidate.entry as McpierConfig['servers'][number]);
-      });
+      // Secrets first (values never logged), then the entries that refer to them. If the
+      // config cannot be saved, the secrets this request created are deleted again.
+      const stored: string[] = [];
+      try {
+        for (const move of moves) {
+          if (!entries.some((candidate) => candidate.name === move.server)) continue;
+          checkSecretValue(move.value);
+          await secrets.set(move.secretName, move.value);
+          stored.push(move.secretName);
+          logger.info({ secret: move.secretName, server: move.server }, 'Imported client secret stored');
+        }
+        await config.update((draft) => {
+          for (const candidate of entries)
+            draft.servers.push(candidate.entry as McpierConfig['servers'][number]);
+        });
+      } catch (error) {
+        for (const name of stored) await secrets.delete(name).catch(() => false);
+        throw error;
+      }
+      if (stored.length > 0) services.events.secretsChanged(await secrets.listNames());
     }
     const response: ImportResponse = {
       dryRun,

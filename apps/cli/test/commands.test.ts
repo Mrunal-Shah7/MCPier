@@ -166,6 +166,81 @@ describe('mcpier server', () => {
     await cli(['server', 'remove', 'broken']);
   });
 
+  it('adds an OAuth client with --scope, --client-id and --client-secret (they imply --oauth)', async () => {
+    const added = await cli([
+      'server',
+      'add',
+      'linear',
+      '--url',
+      'https://mcp.example.com/mcp',
+      '--client-id',
+      'client-123',
+      '--client-secret',
+      'secret:linear-client-secret',
+      '--scope',
+      'read',
+      '--scope',
+      'write issues:create',
+    ]);
+    expect(added.code).toBe(0);
+    const shown = await cli(['server', 'show', 'linear', '--json']);
+    const { config } = JSON.parse(shown.stdout) as { config: Record<string, unknown> };
+    expect(config).toMatchObject({
+      auth: 'oauth',
+      oauth: {
+        clientId: 'client-123',
+        clientSecret: 'secret:linear-client-secret',
+        scopes: ['read', 'write', 'issues:create'],
+      },
+    });
+    const scopesOnly = await cli([
+      'server',
+      'add',
+      'scoped',
+      '--url',
+      'https://mcp.example.com/mcp',
+      '--scope',
+      'read',
+    ]);
+    expect(scopesOnly.code).toBe(0);
+    expect(JSON.parse((await cli(['server', 'show', 'scoped', '--json'])).stdout).config).toMatchObject({
+      auth: 'oauth',
+      oauth: { scopes: ['read'] },
+    });
+    await cli(['server', 'remove', 'linear']);
+    await cli(['server', 'remove', 'scoped']);
+  });
+
+  it('refuses a plain --client-secret without echoing it, and the OAuth flags without --url', async () => {
+    const plain = await cli([
+      'server',
+      'add',
+      'leaky',
+      '--url',
+      'https://mcp.example.com/mcp',
+      '--client-id',
+      'abc',
+      '--client-secret',
+      'PLAIN-CLIENT-SECRET-4545',
+    ]);
+    expect(plain.code).toBe(1);
+    expect(plain.stderr).toContain('--client-secret takes only a reference');
+    expect(plain.stderr).toContain('mcpier secret set <name>');
+    expect(`${plain.stdout}${plain.stderr}`).not.toContain('PLAIN-CLIENT-SECRET-4545');
+    for (const flags of [
+      ['--scope', 'read'],
+      ['--client-id', 'abc'],
+      ['--client-secret', 'secret:x'],
+    ]) {
+      const stdio = await cli(['server', 'add', 'x', ...flags, '--', 'node']);
+      expect(stdio.code).toBe(1);
+      expect(stdio.stderr).toContain('are for remote servers (--url)');
+    }
+    const badScope = await cli(['server', 'add', 'x', '--url', 'https://e.com/mcp', '--scope', 'a"b']);
+    expect(badScope.stderr).toContain('--scope "a"b" must be one scope');
+    expect((await cli(['server', 'list', '--json'])).stdout).not.toContain('"leaky"');
+  });
+
   it('rejects bad add commands with one clear line', async () => {
     const both = await cli(['server', 'add', 'x', '--url', 'https://e.com/mcp', '--', 'node']);
     expect(both.stderr).toBe('mcpier: Give either a command (after --) or --url, not both.\n');
@@ -395,6 +470,84 @@ describe('mcpier server import', () => {
     expect(piped.stdout).toContain('Created quiet (stdio)');
     expect(piped.stderr).toContain('Warning: kept as plain text in config.json: quiet env GH_PAT.');
     expect(piped.stderr).not.toContain('pat-plain-2');
+  });
+
+  it('moves a plain OAuth client secret into a secret, even when it cannot ask; a dry run stores nothing', async () => {
+    const CLIENT_SECRET = 'oauth-client-secret-value-8383';
+    const block = JSON.stringify({
+      mcpServers: {
+        Drive: {
+          url: 'https://mcp.example.com/mcp',
+          oauth: {
+            client_id: 'drive-app',
+            client_secret: CLIENT_SECRET,
+            scope: 'drive.readonly',
+            redirectUri: 'x',
+          },
+          disabled: true,
+        },
+      },
+    });
+    const dry = await cli(['server', 'import', '-', '--dry-run'], block);
+    expect(dry.stdout).toContain('Would create drive (http)');
+    expect(dry.stdout).toContain('  OAuth detected: client ID drive-app, scopes drive.readonly');
+    expect(dry.stdout).toContain(
+      '  clientSecret → secret:drive-client-secret (would be stored in Credential Manager)',
+    );
+    expect(dry.stdout).toContain('  Ignored fields: oauth.redirectUri');
+    expect(await t.secrets.get('drive-client-secret')).toBeUndefined();
+
+    // A taken name gets a suffix; the existing secret is never overwritten.
+    await t.secrets.set('drive-client-secret', 'someone-elses-value');
+    const piped = await cli(['server', 'import', '-'], block);
+    expect(piped.code).toBe(0);
+    expect(piped.stdout).toContain(
+      '  clientSecret → secret:drive-client-secret-2 (stored in Credential Manager)',
+    );
+    expect(stored('drive')).toMatchObject({
+      auth: 'oauth',
+      oauth: {
+        clientId: 'drive-app',
+        clientSecret: 'secret:drive-client-secret-2',
+        scopes: ['drive.readonly'],
+      },
+    });
+    expect(await t.secrets.get('drive-client-secret-2')).toBe(CLIENT_SECRET);
+    expect(await t.secrets.get('drive-client-secret')).toBe('someone-elses-value');
+    for (const text of [
+      dry.stdout,
+      dry.stderr,
+      piped.stdout,
+      piped.stderr,
+      readFileSync(t.home.paths.config, 'utf8'),
+    ]) {
+      expect(text).not.toContain(CLIENT_SECRET);
+    }
+    expect(readFileSync(join(t.home.dir, 'logs', 'gateway.log'), 'utf8')).not.toContain(CLIENT_SECRET);
+    await cli(['server', 'remove', 'drive']);
+  });
+
+  it('--keep-secrets fails only the entry with a plain client secret', async () => {
+    const result = await cli(
+      ['server', 'import', '-', '--keep-secrets'],
+      JSON.stringify({
+        mcpServers: {
+          secretive: {
+            url: 'https://mcp.example.com/mcp',
+            oauth: { clientId: 'x', clientSecret: 'keep-me-plain-9494' },
+          },
+          fine: { url: 'https://mcp.example.com/mcp', oauth: true, disabled: true },
+        },
+      }),
+    );
+    expect(result.code).toBe(1);
+    expect(result.stdout).toContain('Created fine (http)');
+    expect(result.stderr).toContain(
+      'Not imported: "secretive" has a plain client secret, and a client secret is always stored in Credential Manager',
+    );
+    expect(`${result.stdout}${result.stderr}`).not.toContain('keep-me-plain-9494');
+    expect(stored('fine')).toMatchObject({ auth: 'oauth' });
+    await cli(['server', 'remove', 'fine']);
   });
 
   it('reports sse entries, collisions and Windows cmd /c entries', async () => {

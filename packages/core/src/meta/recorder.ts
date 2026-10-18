@@ -21,6 +21,8 @@ export interface SearchEvent {
   /** Full names returned, in order. */
   results: string[];
   durationMs: number;
+  /** The size of the result `search_tools` returned (UTF-8 JSON without `_meta`). */
+  resultBytes?: number;
 }
 
 export const CALL_OUTCOMES = [
@@ -56,8 +58,29 @@ export interface CallEvent {
    */
   arguments?: unknown;
   result?: unknown;
+  /**
+   * The size of the result exactly as the caller received it, redacted: UTF-8 JSON without
+   * `_meta` (`call_tool`: after truncation), measured before any body cap. 0 when the caller got
+   * no result. Recorded whether or not bodies are stored.
+   */
+  resultBytes?: number;
   /** A short error text for failed outcomes (redacted). */
   errorText?: string;
+}
+
+/** The size of a result as JSON, without its top-level `_meta` (UTF-8 bytes). */
+export function resultByteSize(result: unknown): number {
+  if (result === undefined || result === null) return 0;
+  let value = result;
+  if (typeof result === 'object' && !Array.isArray(result) && '_meta' in result) {
+    const { _meta: _ignored, ...rest } = result as Record<string, unknown>;
+    value = rest;
+  }
+  try {
+    return Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8');
+  } catch {
+    return 0;
+  }
 }
 
 /**

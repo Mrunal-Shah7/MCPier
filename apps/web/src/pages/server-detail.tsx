@@ -1,30 +1,56 @@
-import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { useEffect, useState } from 'react';
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  API_PATHS,
   DASHBOARD_API_PATHS,
   looksSensitive,
   parseSecretRef,
   proposedSecretName,
+  splitFullToolName,
   type MoveToSecretResponse,
   type ServerDetailResponse,
-  type ServerLogResponse,
+  type ServerSummary,
   type ToolInfo,
 } from '@mcpier/shared';
-import { ChevronRightIcon, EyeIcon, EyeOffIcon, PencilIcon } from 'lucide-react';
+import {
+  EyeIcon,
+  EyeOffIcon,
+  FlaskConicalIcon,
+  PencilIcon,
+  PlayIcon,
+  RefreshCwIcon,
+  SquareIcon,
+  Trash2Icon,
+} from 'lucide-react';
 import { api } from '@/lib/api';
+import { formatMs } from '@/lib/call-log';
 import { queryKeys, useServer } from '@/lib/queries';
-import { readSse } from '@/lib/sse';
+import { useDeleteServer, useServerAction } from '@/lib/server-actions';
 import { useToolToggle } from '@/lib/tool-toggle';
-import { ErrorMessage, formatDuration, formatTime, LoadingRows, PageHeader } from '@/components/common';
+import { useRecentCalls, useUsage } from '@/lib/usage';
+import { cn } from '@/lib/utils';
+import { ConfirmDialog, CopyButton, ErrorMessage, formatDuration, LoadingRows } from '@/components/common';
+import { ActivityTab } from '@/components/activity';
 import { AuthorizationSection } from '@/components/authorization';
+import { Sparkline } from '@/components/charts';
+import { ErrorBlock } from '@/components/error-block';
+import {
+  Delta,
+  EmptyLine,
+  KeyValues,
+  KpiCard,
+  PageTitle,
+  Panel,
+  PanelBody,
+  PanelHeader,
+  RailGrid,
+  Stack,
+} from '@/components/kit';
 import { ServerActionsMenu } from '@/components/server-actions-menu';
-import { StatusBadge } from '@/components/status-badge';
+import { ServerTile } from '@/components/server-tile';
+import { OutcomeBadge, SecretChip, StatusBadge, ToneBadge, TransportChip } from '@/components/status-badge';
 import { useToast } from '@/components/toaster';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   Dialog,
   DialogContent,
@@ -40,16 +66,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 // ---- Overview
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="grid grid-cols-1 gap-1 py-2 sm:grid-cols-[10rem_1fr]">
-      <dt className="text-muted-foreground text-sm">{label}</dt>
-      <dd className="min-w-0 text-sm break-words">{children}</dd>
-    </div>
-  );
-}
-
-/** One env or header value: references as references; credential-looking plain values masked. */
+/** One env or header value: references as chips; credential-looking plain values masked. */
 function ValueLine({
   location,
   name,
@@ -68,39 +85,37 @@ function ValueLine({
     <li className="flex flex-wrap items-center gap-2 py-1" data-value={name}>
       <span className="font-mono text-xs">{name}</span>
       {parsed.kind === 'secret' ? (
-        <Badge variant="secondary" className="font-mono">
-          {parsed.prefix}secret:{parsed.name}
-        </Badge>
+        <SecretChip name={parsed.name} prefix={parsed.prefix} />
       ) : sensitive && !revealed ? (
         <span className="text-muted-foreground font-mono text-xs" aria-label={`${name} is hidden`}>
           ••••••••
         </span>
       ) : (
-        <span className="font-mono text-xs break-all">{value}</span>
+        <span className="wrap-anywhere font-mono text-xs">{value}</span>
       )}
       {sensitive ? (
         <>
           <Button
             type="button"
             variant="ghost"
-            size="sm"
+            size="xs"
             aria-label={revealed ? `Hide ${name}` : `Reveal ${name}`}
             onClick={() => setRevealed((shown) => !shown)}
           >
             {revealed ? <EyeOffIcon /> : <EyeIcon />}
             {revealed ? 'Hide' : 'Reveal'}
           </Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => onMove(location, name)}>
+          <Button type="button" variant="outline" size="xs" onClick={() => onMove(location, name)}>
             Move to secret
           </Button>
-          <span className="text-muted-foreground text-xs">Stored as plain text in config.json.</span>
+          <span className="text-tone-warn-text text-xs">Plain text in config.json</span>
         </>
       ) : null}
     </li>
   );
 }
 
-function MoveToSecretDialog({
+export function MoveToSecretDialog({
   server,
   target,
   onClose,
@@ -140,8 +155,7 @@ function MoveToSecretDialog({
         <DialogHeader>
           <DialogTitle>Move {target?.key} to a secret</DialogTitle>
           <DialogDescription>
-            MCPier stores the value in Windows Credential Manager and puts a reference in config.json. The
-            server restarts.
+            Stored in Windows Credential Manager; config.json gets a reference. The server restarts.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-1.5">
@@ -166,282 +180,426 @@ function MoveToSecretDialog({
   );
 }
 
-function Overview({ detail }: { detail: ServerDetailResponse }) {
+const seconds = (ms: number) => (ms % 1000 === 0 ? `${ms / 1000} s` : `${ms} ms`);
+
+function ConnectionPanel({ detail }: { detail: ServerDetailResponse }) {
   const { server, config } = detail;
   const [moving, setMoving] = useState<{ location: 'env' | 'header'; key: string } | undefined>();
   const values =
     config.transport === 'stdio'
       ? Object.entries(config.env).map(([key, value]) => ({ location: 'env' as const, key, value }))
       : Object.entries(config.headers).map(([key, value]) => ({ location: 'header' as const, key, value }));
-
-  return (
-    <div className="space-y-6">
-      {config.transport === 'http' && config.auth === 'oauth' ? (
-        <AuthorizationSection server={server.name} />
-      ) : null}
-      <dl className="divide-y rounded-md border px-4">
-        <Row label="Status">
-          <StatusBadge state={server.status.state} />{' '}
-          <span className="text-muted-foreground ml-2 text-xs">since {formatTime(server.status.since)}</span>
-          {server.status.detail ? <p className="mt-1 whitespace-pre-line">{server.status.detail}</p> : null}
-        </Row>
-        <Row label="Enabled">{server.enabled ? 'Yes' : 'No'}</Row>
-        <Row label="Transport">{server.transport}</Row>
-        <Row label="Protocol">{server.protocolVersion ?? '—'}</Row>
-        <Row label="Uptime">
-          {server.status.state === 'ready' ? formatDuration(server.uptimeSeconds) : '—'}
-        </Row>
-        <Row label="Tools">
-          {server.tools.enabled} enabled of {server.tools.total}
-        </Row>
-      </dl>
-
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold">Configuration</h2>
-        <dl className="divide-y rounded-md border px-4">
-          {config.transport === 'stdio' ? (
-            <>
-              <Row label="Command">
-                <code className="font-mono text-xs">{config.command}</code>
-              </Row>
-              <Row label="Arguments">
-                {config.args.length === 0 ? (
-                  '—'
-                ) : (
-                  <ol className="space-y-0.5">
-                    {config.args.map((arg, index) => (
-                      <li key={index} className="font-mono text-xs break-all">
-                        {arg}
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </Row>
-            </>
-          ) : (
-            <>
-              <Row label="URL">
-                <code className="font-mono text-xs break-all">{config.url}</code>
-              </Row>
-              <Row label="Sign-in">{config.auth === 'oauth' ? 'OAuth' : 'None'}</Row>
-            </>
-          )}
-          <Row label={config.transport === 'stdio' ? 'Environment' : 'Headers'}>
-            {values.length === 0 ? (
-              '—'
+  const valueList =
+    values.length === 0 ? (
+      <span className="text-faint">none</span>
+    ) : (
+      <ul className="m-0 list-none p-0">
+        {values.map((value) => (
+          <ValueLine
+            key={`${value.location}:${value.key}`}
+            location={value.location}
+            name={value.key}
+            value={value.value}
+            onMove={(location, key) => setMoving({ location, key })}
+          />
+        ))}
+      </ul>
+    );
+  const rows: [string, React.ReactNode][] =
+    config.transport === 'stdio'
+      ? [
+          ['Command', <code className="font-mono text-xs">{config.command}</code>],
+          [
+            'Arguments',
+            config.args.length === 0 ? (
+              <span className="text-faint">none</span>
             ) : (
-              <ul>
-                {values.map((value) => (
-                  <ValueLine
-                    key={`${value.location}:${value.key}`}
-                    location={value.location}
-                    name={value.key}
-                    value={value.value}
-                    onMove={(location, key) => setMoving({ location, key })}
-                  />
+              <ol className="m-0 list-none space-y-0.5 p-0">
+                {config.args.map((arg, index) => (
+                  <li key={index} className="wrap-anywhere font-mono text-xs">
+                    {arg}
+                  </li>
                 ))}
-              </ul>
-            )}
-          </Row>
-          <Row label="Protocol mode">{config.protocol}</Row>
-          <Row label="Timeouts">
-            call {config.timeoutMs} ms, startup {config.startupTimeoutMs} ms
-          </Row>
-          {config.disabledTools.length > 0 ? (
-            <Row label="Disabled tools">{config.disabledTools.join(', ')}</Row>
-          ) : null}
-        </dl>
-      </section>
+              </ol>
+            ),
+          ],
+          ['Environment', valueList],
+        ]
+      : [
+          ['URL', <code className="wrap-anywhere font-mono text-xs">{config.url}</code>],
+          ['Sign-in', config.auth === 'oauth' ? 'OAuth' : 'None'],
+          ['Headers', valueList],
+        ];
+  rows.push(
+    [
+      'Protocol',
+      <>
+        {config.protocol}
+        {server.protocolVersion ? <span className="text-faint"> → {server.protocolVersion}</span> : null}
+      </>,
+    ],
+    ['Timeouts', `${seconds(config.timeoutMs)} call · ${seconds(config.startupTimeoutMs)} start`],
+    ['Uptime', server.status.state === 'ready' ? formatDuration(server.uptimeSeconds) : '—'],
+  );
+  if (config.disabledTools.length > 0) rows.push(['Disabled tools', config.disabledTools.join(', ')]);
+  return (
+    <Panel aria-label="Connection">
+      <PanelHeader title="Connection" />
+      <PanelBody>
+        <KeyValues rows={rows} />
+      </PanelBody>
       <MoveToSecretDialog server={server.name} target={moving} onClose={() => setMoving(undefined)} />
-    </div>
+    </Panel>
+  );
+}
+
+function QuickActions({ server }: { server: ServerSummary }) {
+  const action = useServerAction();
+  const navigate = useNavigate();
+  const remove = useDeleteServer(() => void navigate('/servers'));
+  const [confirming, setConfirming] = useState(false);
+  const running = server.status.state !== 'stopped';
+  return (
+    <Panel aria-label="Quick actions">
+      <PanelHeader title="Quick actions" />
+      <PanelBody className="flex flex-wrap gap-2">
+        <Button asChild size="sm" variant="outline">
+          <Link to={`/tester?server=${encodeURIComponent(server.name)}`}>
+            <FlaskConicalIcon aria-hidden="true" />
+            Test a tool
+          </Link>
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => action.mutate({ name: server.name, action: 'refresh' })}
+        >
+          <RefreshCwIcon aria-hidden="true" />
+          Refresh tools
+        </Button>
+        {server.enabled ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => action.mutate({ name: server.name, action: running ? 'stop' : 'start' })}
+          >
+            {running ? <SquareIcon aria-hidden="true" /> : <PlayIcon aria-hidden="true" />}
+            {running ? 'Stop' : 'Start'}
+          </Button>
+        ) : null}
+        <Button size="sm" variant="destructive-ghost" onClick={() => setConfirming(true)}>
+          <Trash2Icon aria-hidden="true" />
+          Delete
+        </Button>
+      </PanelBody>
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title={`Delete ${server.name}?`}
+        description={<p>Stops it and removes it from MCPier. Secrets stay in Credential Manager.</p>}
+        confirmLabel={`Delete ${server.name}`}
+        onConfirm={() => remove.mutate(server.name)}
+      />
+    </Panel>
+  );
+}
+
+function OverviewRail({ server }: { server: ServerSummary }) {
+  const week = useUsage({ range: '7d', server: server.name });
+  const recent = useRecentCalls(server.name);
+  const totals = week.data?.totals;
+  return (
+    <Stack>
+      <KpiCard
+        label="Calls · 7 days"
+        value={totals ? totals.calls.toLocaleString() : '—'}
+        delta={totals ? <Delta current={totals.calls} previous={week.data!.previous.calls} /> : undefined}
+        chart={
+          <Sparkline
+            values={week.data?.series.map((point) => point.calls) ?? []}
+            label="Calls per day, last 7 days"
+          />
+        }
+      />
+      <QuickActions server={server} />
+      <Panel aria-label="Recent calls">
+        <PanelHeader
+          title="Recent calls"
+          actions={
+            <Link to={`?tab=activity`} className="text-faint text-xs hover:underline">
+              Activity →
+            </Link>
+          }
+        />
+        {recent.data && recent.data.calls.length > 0 ? (
+          <ul className="m-0 list-none p-0">
+            {recent.data.calls.map((call) => (
+              <li key={call.id} className="flex items-center gap-2.5 border-b px-3.5 py-2 last:border-b-0">
+                <Link to={`?tab=activity&call=${call.id}`} className="min-w-0 flex-1">
+                  <div className="truncate font-mono text-xs">
+                    {splitFullToolName(call.tool)?.tool ?? call.tool}
+                  </div>
+                  <div className="text-faint truncate text-xs">
+                    {call.client.name ?? 'unknown client'} · {new Date(call.at).toLocaleTimeString()} ·{' '}
+                    {formatMs(call.durationMs)}
+                  </div>
+                </Link>
+                <OutcomeBadge outcome={call.outcome} />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-muted-foreground px-3.5 py-3 text-sm">No calls yet.</p>
+        )}
+      </Panel>
+    </Stack>
+  );
+}
+
+function Overview({ detail }: { detail: ServerDetailResponse }) {
+  const { server, config } = detail;
+  return (
+    <RailGrid>
+      <Stack>
+        <ConnectionPanel detail={detail} />
+        {config.transport === 'http' && config.auth === 'oauth' ? (
+          <AuthorizationSection server={server.name} />
+        ) : null}
+      </Stack>
+      <OverviewRail server={server} />
+    </RailGrid>
   );
 }
 
 // ---- Tools
 
+function HintBadges({ tool }: { tool: ToolInfo }) {
+  return (
+    <>
+      {tool.readOnlyHint ? (
+        <ToneBadge tone="info" dot={false}>
+          read-only
+        </ToneBadge>
+      ) : null}
+      {tool.destructiveHint ? (
+        <ToneBadge tone="bad" dot={false}>
+          destructive
+        </ToneBadge>
+      ) : null}
+      {tool.flag ? (
+        <ToneBadge tone="warn" dot={false} className="cursor-help" data-flag={tool.flag}>
+          <span title={tool.flag}>flagged name</span>
+        </ToneBadge>
+      ) : null}
+      {!tool.available ? (
+        <ToneBadge tone="off" dot={false}>
+          unavailable
+        </ToneBadge>
+      ) : null}
+    </>
+  );
+}
+
 function SchemaBlock({ title, schema }: { title: string; schema: Record<string, unknown> | undefined }) {
   if (!schema) return null;
+  const text = JSON.stringify(schema, null, 2);
   return (
-    <div>
-      <p className="text-muted-foreground mb-1 text-xs font-medium">{title}</p>
-      <pre className="bg-muted max-h-80 overflow-auto rounded p-2 font-mono text-xs">
-        {JSON.stringify(schema, null, 2)}
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2">
+        <h3 className="text-xs font-semibold">{title}</h3>
+        <span className="flex-1" />
+        <CopyButton text={text} label={`Copy the ${title.toLowerCase()}`} />
+      </div>
+      <pre className="wrap-anywhere bg-panel-2 max-h-96 overflow-y-auto rounded-lg border p-3 font-mono text-xs whitespace-pre-wrap">
+        {text}
       </pre>
     </div>
   );
 }
 
-function ToolRow({ tool, open }: { tool: ToolInfo; open: boolean }) {
+function ToolsTab({
+  tools,
+  focus,
+  onFocus,
+}: {
+  tools: ToolInfo[];
+  focus: string | null;
+  onFocus: (name: string) => void;
+}) {
   const toggle = useToolToggle();
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (open) ref.current?.scrollIntoView({ block: 'center' });
-  }, [open]);
-  return (
-    <Collapsible defaultOpen={open}>
-      <div ref={ref} id={`tool-${tool.name}`} className="rounded-md border p-3" data-tool={tool.fullName}>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-          <CollapsibleTrigger className="group flex min-w-0 flex-1 items-start gap-2 text-left">
-            <ChevronRightIcon
-              className="mt-0.5 size-4 shrink-0 transition-transform group-data-[state=open]:rotate-90"
-              aria-hidden="true"
-            />
-            <span className="min-w-0">
-              <span className="font-mono text-sm font-medium">{tool.name}</span>
-              {tool.title ? <span className="text-muted-foreground ml-2 text-sm">{tool.title}</span> : null}
-              {tool.description ? (
-                <span className="text-muted-foreground mt-0.5 block text-xs">{tool.description}</span>
-              ) : null}
-            </span>
-          </CollapsibleTrigger>
-          <div className="flex shrink-0 flex-wrap items-center gap-2 pl-6 sm:pl-0">
-            {tool.readOnlyHint ? <Badge variant="secondary">read-only</Badge> : null}
-            {tool.destructiveHint ? <Badge variant="destructive">destructive</Badge> : null}
-            {tool.flag ? (
-              <Badge variant="outline" title={tool.flag}>
-                flagged name
-              </Badge>
-            ) : null}
-            {!tool.available ? <Badge variant="outline">unavailable</Badge> : null}
-            <Switch
-              aria-label={`${tool.enabled ? 'Disable' : 'Enable'} ${tool.fullName}`}
-              checked={tool.enabled}
-              disabled={toggle.isPending}
-              onCheckedChange={(enable) => toggle.mutate({ fullName: tool.fullName, enable })}
-            />
-          </div>
-        </div>
-        <CollapsibleContent className="mt-3 space-y-3">
-          {tool.flag ? <p className="text-muted-foreground text-xs">{tool.flag}</p> : null}
-          <SchemaBlock title="Input schema" schema={tool.inputSchema} />
-          <SchemaBlock title="Output schema" schema={tool.outputSchema} />
-        </CollapsibleContent>
-      </div>
-    </Collapsible>
-  );
-}
-
-function ToolsTab({ tools, focus }: { tools: ToolInfo[]; focus: string | null }) {
+  const [filter, setFilter] = useState('');
   if (tools.length === 0) {
     return (
-      <p className="text-muted-foreground text-sm">
-        No tools listed yet. They appear once the server is ready.
-      </p>
+      <Panel>
+        <EmptyLine>No tools yet. They appear once the server is ready.</EmptyLine>
+      </Panel>
     );
   }
-  return (
-    <div className="space-y-2">
-      {tools.map((tool) => (
-        <ToolRow key={tool.fullName} tool={tool} open={focus === tool.name} />
-      ))}
-    </div>
+  const query = filter.trim().toLowerCase();
+  const shown = tools.filter(
+    (tool) =>
+      !query ||
+      tool.name.toLowerCase().includes(query) ||
+      (tool.description ?? '').toLowerCase().includes(query),
   );
-}
-
-// ---- Logs
-
-const MAX_LINES = 2000;
-
-export function LogsPanel({ server }: { server: string }) {
-  const [lines, setLines] = useState<string[]>([]);
-  const [paused, setPaused] = useState(false);
-  const [error, setError] = useState<unknown>();
-  const pausedRef = useRef(false);
-  const held = useRef<string[]>([]);
-  const box = useRef<HTMLPreElement>(null);
-  const stick = useRef(true);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setLines([]);
-    void (async () => {
-      try {
-        const recent = await api.get<ServerLogResponse>(`${API_PATHS.serverLogs(server)}?lines=200`, {
-          signal: controller.signal,
-        });
-        setLines(recent.lines);
-        await readSse(
-          API_PATHS.serverLogStream(server),
-          (event, data) => {
-            if (event !== 'line') return;
-            if (pausedRef.current) held.current.push(data);
-            else setLines((current) => [...current, data].slice(-MAX_LINES));
-          },
-          controller.signal,
-        );
-      } catch (caught) {
-        if (!controller.signal.aborted) setError(caught);
-      }
-    })();
-    return () => controller.abort();
-  }, [server]);
-
-  // Follow new lines unless the reader scrolled up.
-  useEffect(() => {
-    if (stick.current && box.current) box.current.scrollTop = box.current.scrollHeight;
-  }, [lines]);
-
-  const togglePause = () => {
-    const next = !paused;
-    pausedRef.current = next;
-    setPaused(next);
-    if (!next && held.current.length > 0) {
-      const add = held.current.splice(0);
-      setLines((current) => [...current, ...add].slice(-MAX_LINES));
-    }
-  };
-
+  const selected = tools.find((tool) => tool.name === focus) ?? shown[0] ?? tools[0]!;
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={togglePause}>
-          {paused ? 'Resume' : 'Pause'}
-        </Button>
-        <Button type="button" variant="ghost" size="sm" onClick={() => setLines([])}>
-          Clear view
-        </Button>
-        <span className="text-muted-foreground text-xs">
-          {paused ? 'Paused: new lines are held.' : 'Live.'}
-        </span>
-      </div>
-      {error ? <ErrorMessage error={error} title="The log stream stopped" /> : null}
-      <pre
-        ref={box}
-        aria-label={`${server} log`}
-        onScroll={(event) => {
-          const element = event.currentTarget;
-          stick.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
-        }}
-        className="bg-muted h-96 overflow-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap"
-      >
-        {lines.length === 0 ? 'No log lines yet.' : lines.join('\n')}
-      </pre>
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
+      <Panel aria-label="Tool list" className="overflow-hidden">
+        <div className="flex items-center gap-2 border-b px-3.5 py-2.5">
+          <Label htmlFor="tool-filter" className="sr-only">
+            Filter tools
+          </Label>
+          <Input
+            id="tool-filter"
+            className="h-8"
+            placeholder="Filter tools"
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+          />
+          <span className="text-faint text-xs whitespace-nowrap">
+            {tools.filter((tool) => tool.enabled).length} on
+          </span>
+        </div>
+        <ul className="m-0 max-h-[640px] list-none overflow-y-auto p-0">
+          {shown.map((tool) => (
+            <li
+              key={tool.fullName}
+              data-tool={tool.fullName}
+              className={cn(
+                'flex items-center gap-2.5 border-b px-3.5 py-2.5 last:border-b-0',
+                tool.name === selected.name ? 'bg-brand-soft' : 'hover:bg-panel-2',
+              )}
+            >
+              <button
+                type="button"
+                aria-current={tool.name === selected.name ? 'true' : undefined}
+                className="min-w-0 flex-1 text-left"
+                onClick={() => onFocus(tool.name)}
+              >
+                <code className="block truncate text-[12.5px]">{tool.name}</code>
+                {tool.title || tool.description ? (
+                  <span className="text-faint block truncate text-xs" title={tool.description ?? tool.title}>
+                    {tool.title ?? tool.description}
+                  </span>
+                ) : null}
+              </button>
+              <span className="flex shrink-0 items-center gap-1.5">
+                <HintBadges tool={tool} />
+              </span>
+              <Switch
+                aria-label={`${tool.enabled ? 'Disable' : 'Enable'} ${tool.fullName}`}
+                checked={tool.enabled}
+                disabled={toggle.isPending}
+                onCheckedChange={(enable) => toggle.mutate({ fullName: tool.fullName, enable })}
+              />
+            </li>
+          ))}
+          {shown.length === 0 ? (
+            <li className="text-muted-foreground px-3.5 py-3 text-sm">No tools match.</li>
+          ) : null}
+        </ul>
+      </Panel>
+      <Panel aria-label="Tool detail" id={`tool-${selected.name}`}>
+        <div className="flex flex-wrap items-center gap-2 border-b px-3.5 py-2.5">
+          <div className="min-w-0">
+            <div className="truncate font-mono font-semibold">{selected.name}</div>
+            {selected.title ? <div className="text-faint text-xs">{selected.title}</div> : null}
+          </div>
+          <span className="flex-1" />
+          <HintBadges tool={selected} />
+          <Button asChild size="sm">
+            <Link to={`/tester?tool=${encodeURIComponent(selected.fullName)}`}>
+              <PlayIcon aria-hidden="true" />
+              Try in Tester
+            </Link>
+          </Button>
+        </div>
+        <PanelBody className="space-y-4">
+          {selected.description ? (
+            <p className="text-muted-foreground wrap-anywhere m-0 text-sm whitespace-pre-line">
+              {selected.description}
+            </p>
+          ) : null}
+          {selected.flag ? <p className="text-tone-warn-text m-0 text-xs">{selected.flag}</p> : null}
+          <SchemaBlock title="Input schema" schema={selected.inputSchema} />
+          <SchemaBlock title="Output schema" schema={selected.outputSchema} />
+        </PanelBody>
+      </Panel>
     </div>
   );
 }
 
 // ---- Page
 
+const TABS = ['overview', 'tools', 'activity'] as const;
+
 export function ServerDetailPage() {
   const { name = '' } = useParams();
   const [search, setSearch] = useSearchParams();
+  const location = useLocation();
   const detail = useServer(name);
   const navigate = useNavigate();
+  const action = useServerAction();
   const focusTool = search.get('tool');
-  const tab = search.get('tab') ?? (focusTool ? 'tools' : 'overview');
+  const requested = search.get('tab');
+
+  // The Logs tab became Activity (Sprint 7): old links still land in the right place.
+  if (requested === 'logs') {
+    const next = new URLSearchParams(search);
+    next.set('tab', 'activity');
+    return <Navigate to={`${location.pathname}?${next}`} replace />;
+  }
+  const tab = (TABS as readonly string[]).includes(requested ?? '')
+    ? requested!
+    : focusTool
+      ? 'tools'
+      : 'overview';
+  const callText = search.get('call');
+  const selectedCall = callText && /^\d+$/.test(callText) ? Number(callText) : undefined;
 
   if (detail.isPending) return <LoadingRows label={`Loading ${name}`} />;
   if (detail.error) return <ErrorMessage error={detail.error} title={`Cannot load ${name}`} />;
   const { server } = detail.data;
+  const failing = server.status.state === 'error' || server.status.state === 'crashed';
+  const running = server.status.state !== 'stopped';
 
   return (
     <>
-      <PageHeader
+      <PageTitle
+        crumb={
+          <>
+            <Link to="/servers" className="hover:underline">
+              Servers
+            </Link>{' '}
+            / {server.name}
+          </>
+        }
+        leading={<ServerTile name={server.name} icon={server.icon} size="lg" />}
         title={server.name}
-        description={server.description}
+        info={server.description}
+        meta={
+          <>
+            <StatusBadge state={server.status.state} />
+            {!server.enabled ? <span className="text-faint text-xs">disabled</span> : null}
+            <TransportChip transport={server.transport} />
+            {server.protocolVersion ? (
+              <span className="text-faint font-mono text-xs">{server.protocolVersion}</span>
+            ) : null}
+          </>
+        }
         actions={
           <>
-            <StatusBadge state={server.status.state} className="self-center" />
+            {server.enabled && running ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => action.mutate({ name: server.name, action: 'restart' })}
+              >
+                <RefreshCwIcon aria-hidden="true" />
+                Restart
+              </Button>
+            ) : null}
             <Button variant="outline" size="sm" asChild>
               <Link to={`/servers/${encodeURIComponent(server.name)}/edit`}>
                 <PencilIcon aria-hidden="true" />
@@ -452,20 +610,47 @@ export function ServerDetailPage() {
           </>
         }
       />
+      {server.status.detail && server.status.state !== 'ready' ? (
+        failing ? (
+          <ErrorBlock
+            className="mb-4"
+            message={server.status.detailMessage ?? server.status.detail}
+            raw={server.status.detail}
+          />
+        ) : (
+          <p className="text-muted-foreground wrap-anywhere mb-4 text-sm whitespace-pre-line" role="note">
+            {server.status.detailMessage ?? server.status.detail}
+          </p>
+        )
+      ) : null}
       <Tabs value={tab} onValueChange={(value) => setSearch({ tab: value }, { replace: true })}>
-        <TabsList>
+        <TabsList className="mb-4">
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="tools">Tools ({detail.data.tools.length})</TabsTrigger>
-          <TabsTrigger value="logs">Logs</TabsTrigger>
+          <TabsTrigger value="tools">
+            Tools <span className="text-faint text-[11px]">{detail.data.tools.length}</span>
+          </TabsTrigger>
+          <TabsTrigger value="activity">Activity</TabsTrigger>
         </TabsList>
-        <TabsContent value="overview" className="mt-4">
+        <TabsContent value="overview">
           <Overview detail={detail.data} />
         </TabsContent>
-        <TabsContent value="tools" className="mt-4">
-          <ToolsTab tools={detail.data.tools} focus={focusTool} />
+        <TabsContent value="tools">
+          <ToolsTab
+            tools={detail.data.tools}
+            focus={focusTool}
+            onFocus={(tool) => setSearch({ tab: 'tools', tool }, { replace: true })}
+          />
         </TabsContent>
-        <TabsContent value="logs" className="mt-4">
-          <LogsPanel server={server.name} />
+        <TabsContent value="activity">
+          <ActivityTab
+            server={server.name}
+            selected={selectedCall}
+            onSelect={(id) =>
+              setSearch(id === undefined ? { tab: 'activity' } : { tab: 'activity', call: String(id) }, {
+                replace: true,
+              })
+            }
+          />
         </TabsContent>
       </Tabs>
     </>

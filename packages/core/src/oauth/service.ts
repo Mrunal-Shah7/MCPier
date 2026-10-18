@@ -36,6 +36,7 @@ import {
   type NeedsAuthReason,
   type OAuthDiscoveryResult,
   type RegistrationMethod,
+  type ScopeSource,
   type ServerEntry,
   type Settings,
   type SignInStartResponse,
@@ -222,6 +223,8 @@ export class OAuthService extends EventEmitter<OAuthServiceEvents> {
   private readonly refreshing = new Map<string, Promise<void>>();
   /** Problems that live in memory only (a missing client ID shows until the next attempt). */
   private readonly transientProblems = new Map<string, NeedsAuthReason>();
+  /** The last discovery per server (memory only), so the status can say which scopes come next. */
+  private readonly lastDiscovery = new Map<string, DiscoveryInfo>();
   private readonly now: () => number;
   private readonly marginMs: number;
   private readonly fetchFn: FetchLike;
@@ -318,7 +321,36 @@ export class OAuthService extends EventEmitter<OAuthServiceEvents> {
     if (tokens && record?.lastRefreshAt) status.lastRefreshAt = record.lastRefreshAt;
     if (tokens && record?.signedInAt) status.signedInAt = record.signedInAt;
     if (pending) status.pending = { expiresAt: new Date(pending.expiresAt).toISOString() };
+    status.nextScopes = this.nextScopes(entry, record);
+    const configured = entry.oauth?.scopes ?? [];
+    if (configured.length > 0 && tokens) {
+      // Configured scopes that differ from the grant apply at the next sign-in; the current
+      // tokens keep working until then.
+      const granted = new Set((record?.grantedScopes ?? []).filter((scope) => scope !== 'offline_access'));
+      const wanted = new Set(configured.filter((scope) => scope !== 'offline_access'));
+      status.scopesChanged =
+        [...wanted].some((scope) => !granted.has(scope)) || [...granted].some((scope) => !wanted.has(scope));
+    }
     return status;
+  }
+
+  /** What the next sign-in would request, without any network call. */
+  private nextScopes(entry: HttpServerEntry, record: OAuthRecord | undefined): AuthStatus['nextScopes'] {
+    const info = this.lastDiscovery.get(entry.name);
+    if (info && info.serverUrl === entry.url) return this.scopesFor(entry, info, record);
+    const configured = entry.oauth?.scopes ?? [];
+    if (configured.length > 0) {
+      const stepUp = record?.problem === 'more_permissions' ? record.stepUpScopes : undefined;
+      const scopes = splitScopes(configured, stepUp);
+      if (
+        record?.authorizationServerMetadata?.scopes_supported?.includes('offline_access') &&
+        !scopes.includes('offline_access')
+      ) {
+        scopes.push('offline_access');
+      }
+      return { scopes, source: 'configured' };
+    }
+    return { scopes: [], source: 'decided_at_sign_in' };
   }
 
   /** Every OAuth server's status. */
@@ -449,7 +481,7 @@ export class OAuthService extends EventEmitter<OAuthServiceEvents> {
       // Sent as written in the metadata (the SDK does the same).
       resource = info.resourceMetadata.resource;
     }
-    return {
+    const discovered: DiscoveryInfo = {
       serverUrl: entry.url,
       ...(hint.resourceMetadataUrl ? { resourceMetadataUrl: hint.resourceMetadataUrl.href } : {}),
       ...(info.resourceMetadata ? { resourceMetadata: info.resourceMetadata } : {}),
@@ -459,6 +491,8 @@ export class OAuthService extends EventEmitter<OAuthServiceEvents> {
       resource,
       ...(hint.scope ? { challengeScope: hint.scope } : {}),
     };
+    this.lastDiscovery.set(entry.name, discovered);
+    return discovered;
   }
 
   /** The manual client's secret, resolved from its reference. */
@@ -670,10 +704,30 @@ export class OAuthService extends EventEmitter<OAuthServiceEvents> {
     };
   }
 
-  /** Scopes to ask for: the challenge's (or the resource's), configured extras, granted, step-up. */
-  private scopesFor(entry: HttpServerEntry, info: DiscoveryInfo, record: OAuthRecord | undefined): string[] {
+  /**
+   * Scopes to ask for (D-062 as revised in Sprint 7):
+   * - **configured** (`oauth.scopes`, non-empty): exactly those, plus the step-up scopes only for
+   *   a sign-in that follows a 403 `insufficient_scope`, plus `offline_access` when advertised.
+   *   Granted scopes are not added, so a scope removed from config is really dropped.
+   * - **otherwise**, unchanged from 1.0.0: the challenge's scope (or the resource's
+   *   `scopes_supported`), plus granted and step-up scopes, plus `offline_access` when advertised.
+   */
+  private scopesFor(
+    entry: HttpServerEntry,
+    info: DiscoveryInfo,
+    record: OAuthRecord | undefined,
+  ): { scopes: string[]; source: ScopeSource } {
+    const configured = entry.oauth?.scopes ?? [];
+    if (configured.length > 0) {
+      const stepUp = record?.problem === 'more_permissions' ? record.stepUpScopes : undefined;
+      const scopes = splitScopes(configured, stepUp);
+      if (info.metadata.scopes_supported?.includes('offline_access') && !scopes.includes('offline_access')) {
+        scopes.push('offline_access');
+      }
+      return { scopes, source: 'configured' };
+    }
     const base = info.challengeScope ?? info.resourceMetadata?.scopes_supported;
-    const scopes = splitScopes(base, entry.oauth?.scopes, record?.grantedScopes, record?.stepUpScopes);
+    const scopes = splitScopes(base, record?.grantedScopes, record?.stepUpScopes);
     // OpenID-style servers issue refresh tokens only for offline_access (the SDK's own rule).
     if (
       scopes.length > 0 &&
@@ -682,7 +736,12 @@ export class OAuthService extends EventEmitter<OAuthServiceEvents> {
     ) {
       scopes.push('offline_access');
     }
-    return scopes;
+    const source: ScopeSource = info.challengeScope
+      ? 'challenge'
+      : info.resourceMetadata?.scopes_supported
+        ? 'server_metadata'
+        : 'decided_at_sign_in';
+    return { scopes, source };
   }
 
   /** Discovery only, for the connection test of an unsaved entry: no registration, no sign-in. */
@@ -731,7 +790,7 @@ export class OAuthService extends EventEmitter<OAuthServiceEvents> {
         await this.options.store.remove(name);
         record = undefined;
       }
-      const scopes = this.scopesFor(entry, info, record);
+      const { scopes } = this.scopesFor(entry, info, record);
       const scope = scopes.length > 0 ? scopes.join(' ') : undefined;
       const choice = await this.chooseClient(entry, info, record, scope);
 

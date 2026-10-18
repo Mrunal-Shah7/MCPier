@@ -112,7 +112,18 @@ export interface AuthStatus {
   signedInAt?: string;
   /** A sign-in started and waiting for the browser. */
   pending?: { expiresAt: string };
+  /** The scopes the next sign-in would request, and where they come from. */
+  nextScopes?: { scopes: string[]; source: ScopeSource };
+  /** Configured scopes differ from the granted ones: they apply at the next sign-in. */
+  scopesChanged?: boolean;
 }
+
+/**
+ * Where a sign-in's scopes come from: the entry's `oauth.scopes`, the server's 401 challenge,
+ * the resource's `scopes_supported`, or not known until the sign-in discovers them.
+ */
+export const SCOPE_SOURCES = ['configured', 'challenge', 'server_metadata', 'decided_at_sign_in'] as const;
+export type ScopeSource = (typeof SCOPE_SOURCES)[number];
 
 /** Admin API routes for OAuth (token or cookie required). */
 export const AUTH_API_PATHS = {

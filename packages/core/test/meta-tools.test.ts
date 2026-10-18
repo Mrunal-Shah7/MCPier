@@ -229,6 +229,7 @@ function expectCleanEvents(...forbidden: string[]) {
         'traceId',
         'arguments',
         'result',
+        'resultBytes',
         'errorText',
       ]).toContain(key);
     }

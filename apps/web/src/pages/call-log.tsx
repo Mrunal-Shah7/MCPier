@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query';
-import { ChevronDownIcon, PlayIcon, Trash2Icon, XIcon } from 'lucide-react';
+import { Trash2Icon } from 'lucide-react';
 import {
   CALL_OUTCOME_NAMES,
   SEARCH_FOLLOWUPS,
@@ -10,7 +10,6 @@ import {
   type CallOutcomeName,
   type CallSummary,
   type SearchFollowup,
-  type StoredBody,
 } from '@mcpier/shared';
 import {
   callLogKeys,
@@ -20,11 +19,8 @@ import {
   formatRate,
   matchesFilters,
   OUTCOME_LABELS,
-  outcomeTone,
-  prettyBody,
   RANGES,
   useAllTimeStats,
-  useCallDetail,
   useCalls,
   useCallStats,
   useClearLog,
@@ -35,77 +31,25 @@ import {
 } from '@/lib/call-log';
 import { useLiveEvents } from '@/lib/live';
 import { useServers } from '@/lib/queries';
+import { useUsage } from '@/lib/usage';
 import { cn } from '@/lib/utils';
-import {
-  ConfirmDialog,
-  CopyButton,
-  EmptyState,
-  ErrorMessage,
-  formatTime,
-  LoadingRows,
-  PageHeader,
-} from '@/components/common';
+import { ConfirmDialog, ErrorMessage, formatShortTime, formatTime, LoadingRows } from '@/components/common';
+import { CallDetailPanel, clientLabel } from '@/components/call-detail';
+import { Ring, Sparkline } from '@/components/charts';
+import { EmptyLine, KpiCard, PageTitle, Panel, PanelHeader } from '@/components/kit';
+import { ServerTile } from '@/components/server-tile';
+import { FollowupBadge, OutcomeBadge } from '@/components/status-badge';
 import { useToast } from '@/components/toaster';
 import { Button } from '@/components/ui/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-const TONES = {
-  ok: 'bg-emerald-100 text-emerald-800 ring-emerald-600/20 dark:bg-emerald-950 dark:text-emerald-300 dark:ring-emerald-400/30',
-  info: 'bg-sky-100 text-sky-800 ring-sky-600/20 dark:bg-sky-950 dark:text-sky-300 dark:ring-sky-400/30',
-  warn: 'bg-amber-100 text-amber-900 ring-amber-600/20 dark:bg-amber-950 dark:text-amber-300 dark:ring-amber-400/30',
-  error: 'bg-red-100 text-red-800 ring-red-600/20 dark:bg-red-950 dark:text-red-300 dark:ring-red-400/30',
-  muted:
-    'bg-zinc-100 text-zinc-700 ring-zinc-500/20 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-400/20',
-} as const;
-
-function Pill({
-  tone,
-  children,
-  data,
-}: {
-  tone: keyof typeof TONES;
-  children: string;
-  data?: Record<string, string>;
-}) {
-  return (
-    <span
-      {...data}
-      className={cn(
-        'inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium whitespace-nowrap ring-1 ring-inset',
-        TONES[tone],
-      )}
-    >
-      {children}
-    </span>
-  );
-}
-
-export function OutcomeBadge({ outcome }: { outcome: CallOutcomeName }) {
-  return (
-    <Pill tone={outcomeTone(outcome)} data={{ 'data-outcome': outcome }}>
-      {OUTCOME_LABELS[outcome]}
-    </Pill>
-  );
-}
-
-function FollowupBadge({ followup }: { followup: SearchFollowup }) {
-  const tone = followup === 'hit' ? 'ok' : followup === 'miss' ? 'error' : 'muted';
-  return (
-    <Pill tone={tone} data={{ 'data-followup': followup }}>
-      {FOLLOWUP_LABELS[followup]}
-    </Pill>
-  );
-}
+export { OutcomeBadge } from '@/components/status-badge';
 
 const ANY = '';
-
-const clientLabel = (client: CallSummary['client']) =>
-  client.name ? `${client.name}${client.version ? ` ${client.version}` : ''}` : '(unnamed client)';
 
 /** `datetime-local` value (local time) ⇄ ISO. */
 const toLocalInput = (iso: string | undefined) => {
@@ -140,11 +84,13 @@ function TextFilter({
     return () => clearTimeout(timer);
   }, [text, value]);
   return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id}>{label}</Label>
+    <div>
+      <Label htmlFor={id} className="sr-only">
+        {label}
+      </Label>
       <Input
         id={id}
-        className="w-full sm:w-44"
+        className="h-8 w-full sm:w-44"
         value={text}
         placeholder={placeholder}
         onChange={(event) => setText(event.target.value)}
@@ -164,13 +110,17 @@ function Filters({
 }) {
   const servers = useServers();
   const set = (patch: Partial<CallFilters>) => onChange({ ...filters, ...patch });
+  const select = 'w-full sm:w-40';
   return (
-    <div className="flex flex-wrap items-end gap-3" role="group" aria-label="Filters">
-      <div className="space-y-1.5">
-        <Label htmlFor="log-range">Time</Label>
+    <div className="mb-3.5 flex flex-wrap items-center gap-2.5" role="group" aria-label="Filters">
+      <div>
+        <Label htmlFor="log-range" className="sr-only">
+          Time
+        </Label>
         <NativeSelect
           id="log-range"
-          wrapperClassName="w-40"
+          controlSize="sm"
+          wrapperClassName={select}
           value={filters.range}
           onChange={(event) => {
             const range = event.target.value as RangeKey;
@@ -190,22 +140,26 @@ function Filters({
       </div>
       {filters.range === 'custom' ? (
         <>
-          <div className="space-y-1.5">
-            <Label htmlFor="log-from">From</Label>
+          <div className="flex items-center gap-1.5">
+            <Label htmlFor="log-from" className="text-muted-foreground text-xs">
+              From
+            </Label>
             <Input
               id="log-from"
               type="datetime-local"
-              className="w-52"
+              className="h-8 w-52"
               value={toLocalInput(filters.from)}
               onChange={(event) => set({ from: fromLocalInput(event.target.value) })}
             />
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="log-to">To</Label>
+          <div className="flex items-center gap-1.5">
+            <Label htmlFor="log-to" className="text-muted-foreground text-xs">
+              To
+            </Label>
             <Input
               id="log-to"
               type="datetime-local"
-              className="w-52"
+              className="h-8 w-52"
               value={toLocalInput(filters.to)}
               onChange={(event) => set({ to: fromLocalInput(event.target.value) })}
             />
@@ -213,11 +167,14 @@ function Filters({
         </>
       ) : null}
       {tab === 'calls' ? (
-        <div className="space-y-1.5">
-          <Label htmlFor="log-server">Server</Label>
+        <div>
+          <Label htmlFor="log-server" className="sr-only">
+            Server
+          </Label>
           <NativeSelect
             id="log-server"
-            wrapperClassName="w-full sm:w-44"
+            controlSize="sm"
+            wrapperClassName={select}
             value={filters.server ?? ANY}
             onChange={(event) => set({ server: event.target.value || undefined })}
           >
@@ -237,16 +194,19 @@ function Filters({
         id="log-client"
         label="Client"
         value={filters.client}
-        placeholder="client name"
+        placeholder="Client"
         onChange={(client) => set({ client })}
       />
       {tab === 'calls' ? (
         <>
-          <div className="space-y-1.5">
-            <Label htmlFor="log-outcome">Outcome</Label>
+          <div>
+            <Label htmlFor="log-outcome" className="sr-only">
+              Outcome
+            </Label>
             <NativeSelect
               id="log-outcome"
-              wrapperClassName="w-full sm:w-44"
+              controlSize="sm"
+              wrapperClassName={select}
               value={filters.outcome ?? ANY}
               onChange={(event) =>
                 set({ outcome: (event.target.value || undefined) as CallOutcomeName | undefined })
@@ -264,22 +224,25 @@ function Filters({
             id="log-tool"
             label="Tool name contains"
             value={filters.tool}
-            placeholder="read_file"
+            placeholder="Tool contains"
             onChange={(tool) => set({ tool })}
           />
         </>
       ) : (
-        <div className="space-y-1.5">
-          <Label htmlFor="log-followup">Follow-up</Label>
+        <div>
+          <Label htmlFor="log-followup" className="sr-only">
+            Follow-up
+          </Label>
           <NativeSelect
             id="log-followup"
-            wrapperClassName="w-full sm:w-44"
+            controlSize="sm"
+            wrapperClassName={select}
             value={filters.followup ?? ANY}
             onChange={(event) =>
               set({ followup: (event.target.value || undefined) as SearchFollowup | undefined })
             }
           >
-            <option value={ANY}>All</option>
+            <option value={ANY}>All follow-ups</option>
             {SEARCH_FOLLOWUPS.map((followup) => (
               <option key={followup} value={followup}>
                 {FOLLOWUP_LABELS[followup]}
@@ -292,31 +255,45 @@ function Filters({
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-24">
-      <dt className="text-muted-foreground text-xs">{label}</dt>
-      <dd className="text-lg font-semibold tabular-nums">{value}</dd>
-    </div>
-  );
-}
+/** The sparkline range that fits the filter's range (none for a custom one). */
+const sparkRange = (range: RangeKey) => (range === '7d' ? '7d' : range === 'custom' ? undefined : '24h');
 
 function StatsStrip({ filters }: { filters: CallFilters }) {
   const stats = useCallStats(filters);
+  const range = sparkRange(filters.range);
+  const usage = useUsage({ range: range ?? '24h' }, range !== undefined);
   if (stats.error) return <ErrorMessage error={stats.error} title="Cannot load the stats" />;
   if (!stats.data) return <LoadingRows rows={1} label="Loading stats" />;
   const { calls } = stats.data;
+  const series = usage.data?.series;
   return (
-    <section aria-label="Stats" className="rounded-md border p-3">
-      <dl className="flex flex-wrap gap-x-8 gap-y-2">
-        <Stat label="Calls" value={String(calls.total)} />
-        <Stat label="Error rate" value={formatRate(calls.errorRate)} />
-        <Stat label="Median" value={formatMs(calls.p50Ms)} />
-        <Stat label="95th percentile" value={formatMs(calls.p95Ms)} />
-      </dl>
+    <section aria-label="Stats" className="mb-4 space-y-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          label="Calls"
+          value={String(calls.total)}
+          chart={
+            series ? (
+              <Sparkline values={series.map((point) => point.calls)} label="Calls per bucket" />
+            ) : undefined
+          }
+        />
+        <KpiCard
+          label="Error rate"
+          value={formatRate(calls.errorRate)}
+          valueClassName={calls.errors > 0 ? 'text-tone-bad-text' : undefined}
+          chart={
+            series ? (
+              <Sparkline values={series.map((point) => point.errors)} label="Errors per bucket" tone="bad" />
+            ) : undefined
+          }
+        />
+        <KpiCard label="Median" value={formatMs(calls.p50Ms)} />
+        <KpiCard label="95th percentile" value={formatMs(calls.p95Ms)} />
+      </div>
       {calls.byServer.length > 0 ? (
         <ul
-          className="text-muted-foreground mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs"
+          className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs"
           aria-label="Calls per server"
         >
           {calls.byServer.map((server) => (
@@ -332,157 +309,6 @@ function StatsStrip({ filters }: { filters: CallFilters }) {
   );
 }
 
-function toolHref(call: { tool: string; server?: string }): string | undefined {
-  const parts = splitFullToolName(call.tool);
-  if (!call.server || !parts) return undefined;
-  return `/servers/${encodeURIComponent(call.server)}?tab=tools&tool=${encodeURIComponent(parts.tool)}`;
-}
-
-function Body({ title, body }: { title: string; body: StoredBody | undefined }) {
-  const [open, setOpen] = useState(true);
-  if (!body) {
-    return (
-      <div>
-        <h3 className="text-sm font-medium">{title}</h3>
-        <p className="text-muted-foreground text-sm">None.</p>
-      </div>
-    );
-  }
-  const text = prettyBody(body.text);
-  return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <div className="flex items-center justify-between gap-2">
-        <CollapsibleTrigger asChild>
-          <Button type="button" variant="ghost" size="sm" className="px-1">
-            <ChevronDownIcon
-              aria-hidden="true"
-              className={cn('transition-transform', open ? '' : '-rotate-90')}
-            />
-            {title}
-          </Button>
-        </CollapsibleTrigger>
-        <CopyButton text={body.text} label={`Copy ${title.toLowerCase()}`} />
-      </div>
-      <CollapsibleContent>
-        {body.truncated ? (
-          <p className="text-muted-foreground mb-1 text-xs">Cut at 64 KB when it was stored.</p>
-        ) : null}
-        <pre
-          aria-label={title}
-          className="bg-muted max-h-96 overflow-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap break-all"
-        >
-          {text}
-        </pre>
-      </CollapsibleContent>
-    </Collapsible>
-  );
-}
-
-function CallDetailPanel({ id, onClose }: { id: number; onClose: () => void }) {
-  const detail = useCallDetail(id);
-  const navigate = useNavigate();
-  const call = detail.data;
-  let testerArguments: Record<string, unknown> | undefined;
-  if (call?.arguments && !call.arguments.truncated) {
-    try {
-      const parsed: unknown = JSON.parse(call.arguments.text);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
-        testerArguments = parsed as Record<string, unknown>;
-    } catch {
-      testerArguments = undefined;
-    }
-  }
-  const href = call ? toolHref(call) : undefined;
-  return (
-    <section aria-label="Call detail" className="space-y-4 rounded-md border p-4">
-      <div className="flex items-start justify-between gap-3">
-        <h2 className="text-base font-semibold">Call {id}</h2>
-        <Button type="button" variant="ghost" size="sm" aria-label="Close the call detail" onClick={onClose}>
-          <XIcon aria-hidden="true" />
-        </Button>
-      </div>
-      {detail.isPending ? <LoadingRows rows={3} label="Loading the call" /> : null}
-      {detail.error ? <ErrorMessage error={detail.error} title="Cannot load the call" /> : null}
-      {call ? (
-        <>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-            <dt className="text-muted-foreground">Time</dt>
-            <dd>{formatTime(call.at)}</dd>
-            <dt className="text-muted-foreground">Client</dt>
-            <dd>
-              {clientLabel(call.client)} <span className="text-muted-foreground">({call.era})</span>
-            </dd>
-            <dt className="text-muted-foreground">Tool</dt>
-            <dd className="font-mono text-xs">
-              {href ? (
-                <Link to={href} className="hover:underline">
-                  {call.tool}
-                </Link>
-              ) : (
-                call.tool
-              )}
-            </dd>
-            <dt className="text-muted-foreground">Server</dt>
-            <dd>
-              {call.server ? (
-                <Link to={`/servers/${encodeURIComponent(call.server)}`} className="hover:underline">
-                  {call.server}
-                </Link>
-              ) : (
-                '—'
-              )}
-            </dd>
-            <dt className="text-muted-foreground">Outcome</dt>
-            <dd>
-              <OutcomeBadge outcome={call.outcome} />
-            </dd>
-            <dt className="text-muted-foreground">Duration</dt>
-            <dd>{formatMs(call.durationMs)}</dd>
-            <dt className="text-muted-foreground">Trace id</dt>
-            <dd className="font-mono text-xs break-all">{call.traceId ?? '—'}</dd>
-            {call.errorText ? (
-              <>
-                <dt className="text-muted-foreground">Error</dt>
-                <dd className="text-destructive text-sm break-words">{call.errorText}</dd>
-              </>
-            ) : null}
-          </dl>
-          {call.bodiesStored ? (
-            <div className="space-y-3">
-              <Body title="Arguments" body={call.arguments} />
-              <Body title="Result" body={call.result} />
-            </div>
-          ) : (
-            <p className="text-muted-foreground text-sm" role="note">
-              The arguments and result of this call were not stored: <strong>Store call bodies</strong> was
-              off when it ran. Turn it on in{' '}
-              <Link to="/settings" className="underline">
-                Settings
-              </Link>{' '}
-              to keep them for new calls.
-            </p>
-          )}
-          {testerArguments ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                navigate(`/tester?tool=${encodeURIComponent(call.tool)}`, {
-                  state: { arguments: testerArguments },
-                })
-              }
-            >
-              <PlayIcon aria-hidden="true" />
-              Open in Tester
-            </Button>
-          ) : null}
-        </>
-      ) : null}
-    </section>
-  );
-}
-
 /** Near the top of the page: new calls are shown as they arrive. */
 function useAtTop(): boolean {
   const [atTop, setAtTop] = useState(() => window.scrollY < 64);
@@ -492,6 +318,22 @@ function useAtTop(): boolean {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
   return atTop;
+}
+
+/** A call's tool: the server's tile and the short name (the full name for screen readers and search). */
+export function ToolCell({ call }: { call: Pick<CallSummary, 'tool' | 'server'> }) {
+  const servers = useServers();
+  const short = splitFullToolName(call.tool)?.tool ?? call.tool;
+  const icon = servers.data?.servers.find((server) => server.name === call.server)?.icon;
+  return (
+    <span className="flex min-w-0 items-center gap-2" title={call.tool}>
+      {call.server ? <ServerTile name={call.server} icon={icon} size="sm" /> : null}
+      <span className="sr-only">{call.tool}</span>
+      <span aria-hidden="true" className="truncate font-mono text-xs">
+        {short}
+      </span>
+    </span>
+  );
 }
 
 function CallsTab({
@@ -547,7 +389,7 @@ function CallsTab({
   if (calls.error) return <ErrorMessage error={calls.error} title="Cannot load the call log" />;
   const rows = calls.data.pages.flatMap((page) => page.calls);
   return (
-    <div className="space-y-3">
+    <div className="min-w-0 space-y-3">
       {waiting.length > 0 ? (
         <Button
           type="button"
@@ -562,23 +404,26 @@ function CallsTab({
           {waiting.length === 1 ? 'Show 1 new call' : `Show ${waiting.length} new calls`}
         </Button>
       ) : null}
-      {rows.length === 0 ? (
-        <EmptyState title="No calls match these filters">
-          Calls appear here as clients use MCPier's tools. Try a longer time range, or run a tool from the{' '}
-          <Link to="/tester" className="underline">
-            Tester
-          </Link>
-          .
-        </EmptyState>
-      ) : (
-        <div className="overflow-x-auto rounded-md border">
+      <Panel className="overflow-hidden">
+        {rows.length === 0 ? (
+          <EmptyLine
+            action={
+              <Link to="/tester" className="text-foreground underline">
+                Open the Tester
+              </Link>
+            }
+          >
+            No calls match these filters
+          </EmptyLine>
+        ) : (
           <Table aria-label="Calls">
             <TableHeader>
               <TableRow>
                 <TableHead>Time</TableHead>
-                <TableHead>Client</TableHead>
+                <TableHead className={selected !== undefined ? 'hidden 2xl:table-cell' : undefined}>
+                  Client
+                </TableHead>
                 <TableHead>Tool</TableHead>
-                <TableHead className="hidden md:table-cell">Server</TableHead>
                 <TableHead>Outcome</TableHead>
                 <TableHead className="text-right">Duration</TableHead>
               </TableRow>
@@ -589,32 +434,46 @@ function CallsTab({
                   key={call.id}
                   data-call={call.id}
                   data-state={selected === call.id ? 'selected' : undefined}
+                  className="cursor-pointer"
+                  onClick={() => onSelect(call.id)}
                 >
-                  <TableCell className="text-xs whitespace-nowrap">
+                  <TableCell className="text-muted-foreground font-mono text-xs whitespace-nowrap">
                     <button
                       type="button"
                       className="hover:underline"
                       aria-label={`Details of call ${call.id} (${call.tool})`}
-                      onClick={() => onSelect(call.id)}
+                      title={formatTime(call.at)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onSelect(call.id);
+                      }}
                     >
-                      {formatTime(call.at)}
+                      {formatShortTime(call.at)}
                     </button>
                   </TableCell>
-                  <TableCell className="text-xs">{clientLabel(call.client)}</TableCell>
-                  <TableCell className="max-w-64 truncate font-mono text-xs">{call.tool}</TableCell>
-                  <TableCell className="hidden text-xs md:table-cell">{call.server ?? '—'}</TableCell>
+                  <TableCell
+                    className={cn('text-xs', selected !== undefined && 'hidden 2xl:table-cell')}
+                    title={clientLabel(call.client)}
+                  >
+                    <span className="block max-w-32 truncate">{clientLabel(call.client)}</span>
+                  </TableCell>
+                  <TableCell>
+                    <span className="block max-w-48">
+                      <ToolCell call={call} />
+                    </span>
+                  </TableCell>
                   <TableCell>
                     <OutcomeBadge outcome={call.outcome} />
                   </TableCell>
-                  <TableCell className="text-right text-xs tabular-nums">
+                  <TableCell className="text-muted-foreground text-right text-xs tabular-nums">
                     {formatMs(call.durationMs)}
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-        </div>
-      )}
+        )}
+      </Panel>
       {calls.hasNextPage ? (
         <Button
           type="button"
@@ -635,115 +494,127 @@ function SearchesTab({ filters }: { filters: CallFilters }) {
   const stats = useCallStats(filters);
   const totals = stats.data?.searches;
   return (
-    <div className="space-y-6">
-      <section aria-label="Search hit rate" className="rounded-md border p-3">
+    <div className="space-y-4">
+      <section aria-label="Search hit rate" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {totals ? (
-          <dl className="flex flex-wrap gap-x-8 gap-y-2">
-            <Stat label="Hit rate" value={formatRate(totals.hitRate)} />
-            <Stat label="Searches" value={String(totals.total)} />
-            <Stat label="Hits" value={String(totals.hits)} />
-            <Stat label="Misses" value={String(totals.misses)} />
-            <Stat label="No follow-up" value={String(totals.none)} />
-          </dl>
+          <>
+            <Panel className="flex items-center gap-4 p-3.5">
+              <Ring value={totals.hitRate} display={formatRate(totals.hitRate)} label="Hit rate" />
+              <div>
+                <div className="text-muted-foreground text-xs">Hit rate</div>
+                <div className="text-faint text-xs">of {totals.total} searches</div>
+              </div>
+            </Panel>
+            <KpiCard label="Hits" value={String(totals.hits)} valueClassName="text-tone-ok-text" />
+            <KpiCard label="Misses" value={String(totals.misses)} valueClassName="text-tone-bad-text" />
+            <KpiCard label="No follow-up" value={String(totals.none)} />
+          </>
         ) : (
           <LoadingRows rows={1} label="Loading the hit rate" />
         )}
-        <p className="text-muted-foreground mt-2 text-xs">
-          A search is a hit when the same client's next call, within 5 minutes, is to a tool it returned; a
-          miss when that call is to another tool. Hit rate = hits ÷ (hits + misses).
-        </p>
       </section>
 
-      <section aria-label="Recent misses" className="space-y-2">
-        <h2 className="text-sm font-semibold">Recent misses</h2>
-        {stats.data && stats.data.recentMisses.length === 0 ? (
-          <p className="text-muted-foreground text-sm">No misses in this range.</p>
-        ) : null}
-        {stats.data && stats.data.recentMisses.length > 0 ? (
-          <div className="overflow-x-auto rounded-md border">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0 space-y-3">
+          <Panel className="overflow-hidden" aria-label="Searches">
+            {searches.isPending ? <LoadingRows label="Loading searches" /> : null}
+            {searches.error ? <ErrorMessage error={searches.error} title="Cannot load the searches" /> : null}
+            {searches.data ? (
+              searches.data.pages[0]!.searches.length === 0 ? (
+                <EmptyLine>No searches match these filters.</EmptyLine>
+              ) : (
+                <Table aria-label="Search list">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Time</TableHead>
+                      <TableHead>Client</TableHead>
+                      <TableHead>Query</TableHead>
+                      <TableHead>Outcome</TableHead>
+                      <TableHead className="hidden text-right 2xl:table-cell">Rank</TableHead>
+                      <TableHead>Called</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {searches.data.pages
+                      .flatMap((page) => page.searches)
+                      .map((search) => (
+                        <TableRow key={search.id} data-search={search.id}>
+                          <TableCell
+                            className="text-muted-foreground font-mono text-xs whitespace-nowrap"
+                            title={formatTime(search.at)}
+                          >
+                            {formatShortTime(search.at)}
+                          </TableCell>
+                          <TableCell className="text-xs" title={clientLabel(search.client)}>
+                            <span className="block max-w-28 truncate">{clientLabel(search.client)}</span>
+                          </TableCell>
+                          <TableCell className="text-sm" title={search.query}>
+                            <span className="block max-w-40 truncate">{search.query || '(empty)'}</span>
+                          </TableCell>
+                          <TableCell>
+                            <FollowupBadge followup={search.followup} />
+                          </TableCell>
+                          <TableCell className="hidden text-right text-xs tabular-nums 2xl:table-cell">
+                            {search.rank !== undefined ? `rank ${search.rank}` : '—'}
+                          </TableCell>
+                          <TableCell className="font-mono text-xs" title={search.calledTool}>
+                            <span className="block max-w-32 truncate">{search.calledTool ?? '—'}</span>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                  </TableBody>
+                </Table>
+              )
+            ) : null}
+          </Panel>
+          {searches.hasNextPage ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={searches.isFetchingNextPage}
+              onClick={() => void searches.fetchNextPage()}
+            >
+              Load more
+            </Button>
+          ) : null}
+        </div>
+
+        <Panel aria-label="Recent misses">
+          <PanelHeader
+            title="Recent misses"
+            info="A search is a hit when the same client's next call, within 5 minutes, is to a tool it returned; a miss when that call is to another tool. Hit rate = hits ÷ (hits + misses)."
+          />
+          {stats.data && stats.data.recentMisses.length === 0 ? (
+            <p className="text-muted-foreground px-3.5 py-3 text-sm">No misses in this range.</p>
+          ) : null}
+          {stats.data && stats.data.recentMisses.length > 0 ? (
             <Table aria-label="Recent misses">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Time</TableHead>
                   <TableHead>Query</TableHead>
-                  <TableHead>Search returned</TableHead>
                   <TableHead>Called instead</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {stats.data.recentMisses.map((miss) => (
                   <TableRow key={miss.searchId}>
-                    <TableCell className="text-xs whitespace-nowrap">{formatTime(miss.at)}</TableCell>
-                    <TableCell className="text-sm">{miss.query}</TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {miss.results.join(', ') || '(nothing)'}
+                    <TableCell className="max-w-40 whitespace-normal">
+                      <div className="wrap-anywhere text-sm">“{miss.query}”</div>
+                      <div className="text-faint wrap-anywhere text-xs" title={miss.results.join(', ')}>
+                        returned {miss.results.join(', ') || '(nothing)'}
+                      </div>
                     </TableCell>
-                    <TableCell className="font-mono text-xs">{miss.calledTool}</TableCell>
+                    <TableCell className="text-tone-bad-text wrap-anywhere font-mono text-xs whitespace-normal">
+                      {miss.calledTool}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-          </div>
-        ) : null}
-      </section>
-
-      <section aria-label="Searches" className="space-y-2">
-        <h2 className="text-sm font-semibold">Searches</h2>
-        {searches.isPending ? <LoadingRows label="Loading searches" /> : null}
-        {searches.error ? <ErrorMessage error={searches.error} title="Cannot load the searches" /> : null}
-        {searches.data ? (
-          searches.data.pages[0]!.searches.length === 0 ? (
-            <EmptyState title="No searches match these filters" />
-          ) : (
-            <div className="overflow-x-auto rounded-md border">
-              <Table aria-label="Search list">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Time</TableHead>
-                    <TableHead>Client</TableHead>
-                    <TableHead>Query</TableHead>
-                    <TableHead className="text-right">Results</TableHead>
-                    <TableHead>Follow-up</TableHead>
-                    <TableHead>Called</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {searches.data.pages
-                    .flatMap((page) => page.searches)
-                    .map((search) => (
-                      <TableRow key={search.id} data-search={search.id}>
-                        <TableCell className="text-xs whitespace-nowrap">{formatTime(search.at)}</TableCell>
-                        <TableCell className="text-xs">{clientLabel(search.client)}</TableCell>
-                        <TableCell className="text-sm">{search.query || '(empty)'}</TableCell>
-                        <TableCell className="text-right text-xs tabular-nums">
-                          {search.resultCount}
-                        </TableCell>
-                        <TableCell>
-                          <FollowupBadge followup={search.followup} />
-                          {search.rank !== undefined ? (
-                            <span className="text-muted-foreground ml-1 text-xs">rank {search.rank}</span>
-                          ) : null}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">{search.calledTool ?? '—'}</TableCell>
-                      </TableRow>
-                    ))}
-                </TableBody>
-              </Table>
-            </div>
-          )
-        ) : null}
-        {searches.hasNextPage ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={searches.isFetchingNextPage}
-            onClick={() => void searches.fetchNextPage()}
-          >
-            Load more
-          </Button>
-        ) : null}
-      </section>
+          ) : null}
+        </Panel>
+      </div>
     </div>
   );
 }
@@ -758,7 +629,12 @@ function ClearLog() {
     : 'every recorded call and search';
   return (
     <>
-      <Button type="button" variant="outline" onClick={() => setOpen(true)} disabled={clear.isPending}>
+      <Button
+        type="button"
+        variant="destructive-ghost"
+        onClick={() => setOpen(true)}
+        disabled={clear.isPending}
+      >
         <Trash2Icon aria-hidden="true" />
         Clear log
       </Button>
@@ -805,9 +681,9 @@ export function CallLogPage() {
   };
   return (
     <>
-      <PageHeader
+      <PageTitle
         title="Call log"
-        description="Every tool call and search through MCPier, newest first."
+        info="Every tool call and search through MCPier, newest first. Errors show their readable message; the raw response is one click away."
         actions={<ClearLog />}
       />
       <Tabs
@@ -820,36 +696,34 @@ export function CallLogPage() {
           })
         }
       >
-        <TabsList>
+        <TabsList className="mb-4">
           <TabsTrigger value="calls">Calls</TabsTrigger>
           <TabsTrigger value="searches">Search</TabsTrigger>
         </TabsList>
-        <div className="mt-4 space-y-4">
-          <Filters filters={filters} tab={tab} onChange={(next) => setParams(withFilters(params, next))} />
-          <TabsContent value="calls" className="space-y-4">
-            <StatsStrip filters={filters} />
-            <div
-              className={cn(
-                'grid grid-cols-[minmax(0,1fr)] gap-4',
-                selected !== undefined ? 'lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]' : '',
-              )}
-            >
-              <CallsTab
-                filters={filters}
-                selected={selected}
-                onSelect={(id) =>
-                  update((next) => (id === undefined ? next.delete('call') : next.set('call', String(id))))
-                }
-              />
-              {selected !== undefined ? (
-                <CallDetailPanel id={selected} onClose={() => update((next) => next.delete('call'))} />
-              ) : null}
-            </div>
-          </TabsContent>
-          <TabsContent value="searches">
-            <SearchesTab filters={filters} />
-          </TabsContent>
-        </div>
+        <Filters filters={filters} tab={tab} onChange={(next) => setParams(withFilters(params, next))} />
+        <TabsContent value="calls">
+          <StatsStrip filters={filters} />
+          <div
+            className={cn(
+              'grid grid-cols-1 gap-4',
+              selected !== undefined ? 'xl:grid-cols-[minmax(0,1fr)_440px]' : '',
+            )}
+          >
+            <CallsTab
+              filters={filters}
+              selected={selected}
+              onSelect={(id) =>
+                update((next) => (id === undefined ? next.delete('call') : next.set('call', String(id))))
+              }
+            />
+            {selected !== undefined ? (
+              <CallDetailPanel id={selected} onClose={() => update((next) => next.delete('call'))} />
+            ) : null}
+          </div>
+        </TabsContent>
+        <TabsContent value="searches">
+          <SearchesTab filters={filters} />
+        </TabsContent>
       </Tabs>
     </>
   );

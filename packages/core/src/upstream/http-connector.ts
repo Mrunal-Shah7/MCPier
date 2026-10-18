@@ -24,7 +24,9 @@ import {
   type Connector,
   type ConnectorEvents,
   type ToolListing,
+  pickServerInfo,
   type UpstreamCallResult,
+  type UpstreamServerInfo,
 } from './types.js';
 
 /** Network errors are retried this many extra times, for connecting and listing only. */
@@ -61,6 +63,10 @@ export class HttpConnector extends EventEmitter<ConnectorEvents> implements Conn
 
   get protocolVersion(): string | undefined {
     return this.client?.getNegotiatedProtocolVersion();
+  }
+
+  get serverInfo(): UpstreamServerInfo | undefined {
+    return pickServerInfo(this.client?.getServerVersion());
   }
 
   async connect(): Promise<void> {

@@ -11,3 +11,5 @@ export * from './oauth.js';
 export * from './call-log.js';
 export * from './doctor.js';
 export * from './json.js';
+export * from './errors.js';
+export * from './usage.js';

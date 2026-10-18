@@ -27,7 +27,12 @@ import {
   type TesterRun,
 } from '@/lib/tester';
 import { cn } from '@/lib/utils';
-import { EmptyState, ErrorMessage, formatTime, LoadingRows, PageHeader } from '@/components/common';
+import { cleanErrorMessage } from '@mcpier/shared';
+import { ErrorBlock } from '@/components/error-block';
+import { InfoTip, PageTitle, Panel } from '@/components/kit';
+import { ServerTile } from '@/components/server-tile';
+import { ToneBadge } from '@/components/status-badge';
+import { EmptyState, ErrorMessage, formatTime, LoadingRows } from '@/components/common';
 import { JsonEditor, SchemaForm } from '@/components/schema-form';
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
@@ -45,6 +50,8 @@ interface TesterLocationState {
 // ---- Picking a tool
 
 function ToolPicker({ onPick }: { onPick: (fullName: string) => void }) {
+  const [params] = useSearchParams();
+  const server = params.get('server') ?? undefined;
   const [text, setText] = useState('');
   const [query, setQuery] = useState('');
   useEffect(() => {
@@ -52,11 +59,12 @@ function ToolPicker({ onPick }: { onPick: (fullName: string) => void }) {
     return () => clearTimeout(timer);
   }, [text]);
   const search = useQuery({
-    queryKey: ['tester-search', query],
-    enabled: query !== '',
+    queryKey: ['tester-search', query, server],
+    // With a server (from its page), an empty query lists that server's tools.
+    enabled: query !== '' || server !== undefined,
     queryFn: () =>
       api.get<ToolSearchResponse>(
-        `${API_PATHS.toolSearch}?${new URLSearchParams({ q: query, limit: '10' })}`,
+        `${API_PATHS.toolSearch}?${new URLSearchParams({ q: query, limit: server ? '20' : '10', ...(server ? { server } : {}) })}`,
       ),
   });
   return (
@@ -206,7 +214,7 @@ function Block({ block }: { block: ContentBlock }) {
           {block.resource.mimeType ? ` (${block.resource.mimeType})` : ''}
         </p>
         {typeof block.resource.text === 'string' ? (
-          <pre className="bg-muted overflow-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap">
+          <pre className="wrap-anywhere bg-panel-2 max-h-96 overflow-y-auto rounded-lg border p-3 font-mono text-xs whitespace-pre-wrap">
             {block.resource.text}
           </pre>
         ) : (
@@ -226,15 +234,32 @@ function ResultView({ response }: { response: TesterCallResponse }) {
   const result = response.result as
     | { content?: ContentBlock[]; structuredContent?: unknown; isError?: boolean; resultType?: string }
     | undefined;
+  // A tool error's first text block is shown as its clean message, the raw text one click away.
+  const errorIndex = result?.isError
+    ? (result.content ?? []).findIndex((block) => block.type === 'text')
+    : -1;
+  const errorText = errorIndex >= 0 ? (result!.content![errorIndex]!.text ?? '') : undefined;
   return (
-    <section aria-label="Result" className="space-y-3 rounded-md border p-4">
-      <div className="flex flex-wrap items-center gap-3 text-sm">
+    <section
+      aria-label="Result"
+      className="bg-card min-w-0 space-y-3 rounded-[10px] border p-3.5 shadow-card"
+    >
+      <div className="flex flex-wrap items-center gap-3 border-b pb-2.5 text-sm">
+        <h2 className="text-[13px] font-semibold">Result</h2>
+        <span className="flex-1" />
         <OutcomeBadge outcome={response.outcome} />
-        <span className="text-muted-foreground">{formatMs(response.durationMs)}</span>
-        <span className="text-muted-foreground">
+        <span className="text-faint text-xs">{formatMs(response.durationMs)}</span>
+        <span className="text-faint text-xs">
           {response.mode === 'model' ? 'As the model sees it' : 'Raw'}
         </span>
       </div>
+      {errorText !== undefined ? (
+        <ErrorBlock
+          message={cleanErrorMessage(errorText).message}
+          raw={errorText}
+          code={cleanErrorMessage(errorText).code}
+        />
+      ) : null}
       {response.truncation ? (
         <p className="text-sm" role="note">
           Cut to the result size limit (the <code>resultSizeLimitKb</code> setting)
@@ -248,22 +273,22 @@ function ResultView({ response }: { response: TesterCallResponse }) {
         </p>
       ) : null}
       {response.error ? (
-        <p className="text-destructive text-sm whitespace-pre-line">{response.error}</p>
+        <ErrorBlock message={cleanErrorMessage(response.error).message} raw={response.error} />
       ) : null}
       {result?.resultType === 'input_required' && response.mode === 'raw' ? (
         <p className="text-muted-foreground text-sm">
           The server asked for input. Raw mode cannot answer it; run the tool as the model sees it to answer.
         </p>
       ) : null}
-      {result?.content?.map((block, index) => (
-        <Block key={index} block={block} />
-      ))}
+      {result?.content?.map((block, index) =>
+        index === errorIndex ? null : <Block key={index} block={block} />,
+      )}
       {result?.structuredContent !== undefined ? (
         <div>
           <h3 className="mb-1 text-sm font-medium">Structured content</h3>
           <pre
             aria-label="Structured content"
-            className="bg-muted overflow-auto rounded-md p-3 font-mono text-xs"
+            className="wrap-anywhere bg-panel-2 max-h-96 overflow-y-auto rounded-lg border p-3 font-mono text-xs whitespace-pre-wrap"
           >
             {JSON.stringify(result.structuredContent, null, 2)}
           </pre>
@@ -311,7 +336,7 @@ function ElicitationRequest({
             {request.params?.mode && request.params.mode !== 'form' ? `, mode ${request.params.mode}` : ''}).
             You can decline or cancel it.
           </p>
-          <pre className="bg-muted overflow-auto rounded-md p-3 font-mono text-xs">
+          <pre className="wrap-anywhere bg-panel-2 max-h-96 overflow-y-auto rounded-lg border p-3 font-mono text-xs whitespace-pre-wrap">
             {JSON.stringify(request, null, 2)}
           </pre>
         </div>
@@ -409,7 +434,7 @@ function ValidationSummary({ answer }: { answer: ValidateArgumentsResponse | und
     );
   }
   return (
-    <p className="text-destructive text-sm" role="status" aria-label="Validation">
+    <p className="text-tone-bad-text text-sm" role="status" aria-label="Validation">
       {answer.problems.length === 1 ? '1 problem' : `${answer.problems.length} problems`} with the arguments.
     </p>
   );
@@ -417,37 +442,59 @@ function ValidationSummary({ answer }: { answer: ValidateArgumentsResponse | und
 
 function History({ onShow }: { onShow: (run: TesterRun) => void }) {
   const runs = useTesterHistory();
-  if (runs.length === 0) return null;
   return (
-    <section aria-label="Tester history" className="space-y-2">
-      <h2 className="text-sm font-semibold">This session's runs</h2>
-      <p className="text-muted-foreground text-xs">The last 20, kept only while this page is open.</p>
-      <ol className="divide-y rounded-md border">
-        {runs.map((run) => (
-          <li key={run.id} className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm" data-run={run.id}>
-            <span className="text-muted-foreground text-xs">{formatTime(run.at)}</span>
-            <span className="font-mono text-xs">{run.tool}</span>
-            <span className="text-muted-foreground text-xs">{run.mode === 'model' ? 'model' : 'raw'}</span>
-            <OutcomeBadge outcome={run.response.outcome} />
-            <span className="text-muted-foreground text-xs">{formatMs(run.response.durationMs)}</span>
-            <Button type="button" variant="ghost" size="sm" className="ml-auto" onClick={() => onShow(run)}>
-              Show
-            </Button>
-          </li>
-        ))}
-      </ol>
+    <section
+      aria-label="Tester history"
+      className="bg-card min-w-0 self-start rounded-[10px] border shadow-card"
+    >
+      <div className="flex items-center gap-2 border-b px-3.5 py-2.5">
+        <h2 className="text-[13px] font-semibold">History</h2>
+        <InfoTip label="About the history">The last 20 runs, kept only while this page is open.</InfoTip>
+      </div>
+      {runs.length === 0 ? (
+        <p className="text-muted-foreground px-3.5 py-3 text-sm">No runs yet.</p>
+      ) : (
+        <ol className="m-0 list-none p-0">
+          {runs.map((run) => (
+            <li
+              key={run.id}
+              className="flex items-center gap-2 border-b px-3.5 py-2 last:border-b-0"
+              data-run={run.id}
+            >
+              <button
+                type="button"
+                className="min-w-0 flex-1 text-left"
+                onClick={() => onShow(run)}
+                aria-label={`Show ${run.tool}`}
+              >
+                <span className="block truncate font-mono text-xs">{run.tool}</span>
+                <span className="text-faint block text-xs">
+                  {formatTime(run.at)} · {run.mode === 'model' ? 'model' : 'raw'} ·{' '}
+                  {formatMs(run.response.durationMs)}
+                </span>
+              </button>
+              <OutcomeBadge outcome={run.response.outcome} />
+              <Button type="button" variant="ghost" size="xs" onClick={() => onShow(run)}>
+                Show
+              </Button>
+            </li>
+          ))}
+        </ol>
+      )}
     </section>
   );
 }
 
 function ToolPanel({
   tool,
+  mode,
   initialArguments,
   initialRun,
   onChangeTool,
   onShowRun,
 }: {
   tool: ToolInfo;
+  mode: TesterMode;
   initialArguments?: Record<string, unknown>;
   initialRun?: TesterRun;
   onChangeTool: () => void;
@@ -466,7 +513,6 @@ function ToolPanel({
     setFormValue(next);
   };
   const [rawJson, setRawJson] = useState(field.kind !== 'object');
-  const [mode, setMode] = useState<TesterMode>(initialRun?.mode ?? 'model');
   const [response, setResponse] = useState<TesterCallResponse | undefined>(initialRun?.response);
   const [round, setRound] = useState(0);
   const validation = useLiveValidation(tool.fullName, value, true);
@@ -487,141 +533,176 @@ function ToolPanel({
   const unavailable = !tool.available;
 
   return (
-    <div className="space-y-6">
-      <section aria-label="Tool" className="space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="font-mono text-base font-semibold">{tool.fullName}</h2>
-          {tool.readOnlyHint ? (
-            <span className="text-muted-foreground rounded border px-1.5 text-xs">read-only</span>
-          ) : null}
-          {tool.destructiveHint ? (
-            <span className="rounded border border-red-500/40 px-1.5 text-xs text-red-700 dark:text-red-400">
-              destructive
-            </span>
-          ) : null}
-          {!tool.enabled ? (
-            <span className="text-muted-foreground rounded border px-1.5 text-xs">disabled in MCPier</span>
-          ) : null}
-          <Button type="button" variant="ghost" size="sm" onClick={onChangeTool}>
-            Change tool
-          </Button>
-        </div>
-        {tool.description ? (
-          <p className="text-muted-foreground text-sm whitespace-pre-line">{tool.description}</p>
-        ) : null}
-        {unavailable ? (
-          <div className="flex flex-wrap items-center gap-2 text-sm" role="note">
-            <span>The tool is not available: its server is</span>
-            {server ? <StatusBadge state={server.status.state} /> : <span>not connected</span>}
-            {server?.status.detail ? (
-              <span className="text-muted-foreground">({server.status.detail})</span>
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_260px]">
+      <Panel className="space-y-4 self-start p-3.5">
+        <section aria-label="Tool" className="space-y-2">
+          <div className="bg-panel-2 flex min-h-10 flex-wrap items-center gap-2 rounded-md border px-3 py-1.5">
+            <ServerTile name={tool.server} icon={server?.icon} size="sm" />
+            <h2 className="min-w-0 flex-1 truncate font-mono text-[13px] font-semibold">{tool.fullName}</h2>
+            {tool.readOnlyHint ? (
+              <ToneBadge tone="info" dot={false}>
+                read-only
+              </ToneBadge>
             ) : null}
-            <Link to={`/servers/${encodeURIComponent(tool.server)}`} className="underline">
-              Open {tool.server}
-            </Link>
+            {tool.destructiveHint ? (
+              <ToneBadge tone="bad" dot={false}>
+                destructive
+              </ToneBadge>
+            ) : null}
+            {!tool.enabled ? (
+              <ToneBadge tone="off" dot={false}>
+                disabled in MCPier
+              </ToneBadge>
+            ) : null}
+            <Button type="button" variant="ghost" size="xs" onClick={onChangeTool}>
+              Change tool
+            </Button>
           </div>
-        ) : null}
-      </section>
+          {tool.description ? (
+            <p className="text-muted-foreground wrap-anywhere m-0 text-sm whitespace-pre-line">
+              {tool.description}
+            </p>
+          ) : null}
+          {unavailable ? (
+            <div className="flex flex-wrap items-center gap-2 text-sm" role="note">
+              <span>The tool is not available: its server is</span>
+              {server ? <StatusBadge state={server.status.state} /> : <span>not connected</span>}
+              {server?.status.detail ? (
+                <span className="text-muted-foreground wrap-anywhere">
+                  ({server.status.detailMessage ?? server.status.detail})
+                </span>
+              ) : null}
+              <Link to={`/servers/${encodeURIComponent(tool.server)}`} className="underline">
+                Open {tool.server}
+              </Link>
+            </div>
+          ) : null}
+        </section>
 
-      <section aria-label="Arguments" className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold">Arguments</h2>
-          <div className="flex items-center gap-2">
-            <Switch
-              id="tester-raw-json"
-              checked={rawJson}
-              disabled={field.kind !== 'object'}
-              onCheckedChange={setRawJson}
-            />
-            <Label htmlFor="tester-raw-json">Raw JSON</Label>
-          </div>
-        </div>
-        {rawJson ? (
-          <div className="space-y-1.5">
-            <JsonEditor
-              id="tester-json"
-              label="Arguments (JSON)"
-              rows={10}
-              value={value}
-              invalid={problems.length > 0}
-              onChange={(next) =>
-                setValue(
-                  next && typeof next === 'object' && !Array.isArray(next)
-                    ? (next as Record<string, unknown>)
-                    : {},
-                )
+        <section aria-label="Arguments" className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <ValidationSummary
+              answer={
+                touched || validation.answer?.result === 'not_validated' ? validation.answer : undefined
               }
             />
-            {problems.length > 0 ? (
-              <ul className="text-destructive space-y-0.5 text-xs" aria-label="Problems">
-                {problems.map((problem) => (
-                  <li key={`${problem.location}:${problem.message}`}>
-                    {problem.location}: {problem.message}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-        ) : (
-          <SchemaForm field={field} value={value} onChange={setValue} problems={problems} />
-        )}
-        <ValidationSummary
-          answer={touched || validation.answer?.result === 'not_validated' ? validation.answer : undefined}
-        />
-        {validation.failed ? <ErrorMessage error={validation.failed} title="Cannot validate" /> : null}
-      </section>
-
-      <section aria-label="Run" className="flex flex-wrap items-center gap-4">
-        <fieldset className="flex flex-wrap items-center gap-4">
-          <legend className="sr-only">Mode</legend>
-          {(
-            [
-              ['model', 'As the model sees it'],
-              ['raw', 'Raw'],
-            ] as const
-          ).map(([key, label]) => (
-            <label key={key} className="flex items-center gap-1.5 text-sm">
-              <input
-                type="radio"
-                name="tester-mode"
-                value={key}
-                checked={mode === key}
-                onChange={() => setMode(key)}
-                className="accent-primary"
+            <span className="flex-1" />
+            <div className="flex items-center gap-2">
+              <Switch
+                id="tester-raw-json"
+                checked={rawJson}
+                disabled={field.kind !== 'object'}
+                onCheckedChange={setRawJson}
               />
-              {label}
-            </label>
-          ))}
-        </fieldset>
-        <Button
-          type="button"
-          disabled={unavailable || run.isPending}
-          onClick={() => {
-            setTouched(true);
-            run.mutate({});
-          }}
-        >
-          <PlayIcon aria-hidden="true" />
-          {run.isPending ? 'Running…' : 'Run'}
-        </Button>
-        <p className="text-muted-foreground w-full text-xs">
-          {mode === 'model'
-            ? 'Exactly as call_tool runs it: validation, the result size limit, and input requests you can answer here.'
-            : 'Straight to the server: no validation by MCPier, no size limit, no input requests.'}
-        </p>
-      </section>
+              <Label htmlFor="tester-raw-json">Raw JSON</Label>
+            </div>
+          </div>
+          {rawJson ? (
+            <div className="space-y-1.5">
+              <JsonEditor
+                id="tester-json"
+                label="Arguments (JSON)"
+                rows={10}
+                value={value}
+                invalid={problems.length > 0}
+                onChange={(next) =>
+                  setValue(
+                    next && typeof next === 'object' && !Array.isArray(next)
+                      ? (next as Record<string, unknown>)
+                      : {},
+                  )
+                }
+              />
+              {problems.length > 0 ? (
+                <ul className="text-tone-bad-text space-y-0.5 text-xs" aria-label="Problems">
+                  {problems.map((problem) => (
+                    <li key={`${problem.location}:${problem.message}`}>
+                      {problem.location}: {problem.message}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : (
+            <SchemaForm field={field} value={value} onChange={setValue} problems={problems} />
+          )}
+          {validation.failed ? <ErrorMessage error={validation.failed} title="Cannot validate" /> : null}
+        </section>
 
-      {run.error ? <ErrorMessage error={run.error} title="The run failed" /> : null}
-      {asked ? (
-        <Elicitation
-          key={round}
-          requests={asked.inputRequests}
-          onComplete={(answers) => run.mutate({ inputResponses: answers, requestState: asked.requestState })}
-        />
-      ) : null}
-      {response && !asked ? <ResultView response={response} /> : null}
+        <section aria-label="Run">
+          <Button
+            type="button"
+            className="h-9 w-full"
+            disabled={unavailable || run.isPending}
+            onClick={() => {
+              setTouched(true);
+              run.mutate({});
+            }}
+          >
+            <PlayIcon aria-hidden="true" />
+            {run.isPending ? 'Running…' : 'Run'}
+          </Button>
+        </section>
+      </Panel>
+
+      <div className="min-w-0 space-y-4">
+        {run.error ? <ErrorMessage error={run.error} title="The run failed" /> : null}
+        {asked ? (
+          <Elicitation
+            key={round}
+            requests={asked.inputRequests}
+            onComplete={(answers) =>
+              run.mutate({ inputResponses: answers, requestState: asked.requestState })
+            }
+          />
+        ) : null}
+        {response && !asked ? <ResultView response={response} /> : null}
+        {!response && !asked && !run.error ? (
+          <Panel>
+            <p className="text-muted-foreground px-3.5 py-6 text-center text-sm">
+              Run the tool to see its result.
+            </p>
+          </Panel>
+        ) : null}
+      </div>
+
       <History onShow={onShowRun} />
     </div>
+  );
+}
+
+/** The mode as two radio buttons drawn as a segmented control. */
+function ModeSwitch({ mode, onChange }: { mode: TesterMode; onChange: (mode: TesterMode) => void }) {
+  return (
+    <fieldset className="border-line-2 m-0 inline-flex overflow-hidden rounded-lg border p-0">
+      <legend className="sr-only">Mode</legend>
+      {(
+        [
+          ['model', 'As the model sees it'],
+          ['raw', 'Raw'],
+        ] as const
+      ).map(([key, label]) => (
+        <label
+          key={key}
+          className={cn(
+            'has-[:focus-visible]:ring-ring/50 cursor-pointer px-3 py-1.5 text-[12.5px] has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-inset',
+            mode === key
+              ? 'bg-brand-soft text-tone-ok-text font-semibold'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          <input
+            type="radio"
+            name="tester-mode"
+            value={key}
+            checked={mode === key}
+            onChange={() => onChange(key)}
+            className="sr-only"
+          />
+          {label}
+        </label>
+      ))}
+    </fieldset>
   );
 }
 
@@ -634,6 +715,7 @@ export function TesterPage() {
   const state = (location.state ?? {}) as TesterLocationState;
   const initialRun = state.runId !== undefined ? findRun(state.runId) : undefined;
   const tool = selected ? tools.data?.tools.find((entry) => entry.fullName === selected) : undefined;
+  const [mode, setMode] = useState<TesterMode>(initialRun?.mode ?? 'model');
 
   const pick = (fullName: string | undefined, nextState?: TesterLocationState) => {
     const next = new URLSearchParams(params);
@@ -641,15 +723,27 @@ export function TesterPage() {
     else next.delete('tool');
     setParams(next, { state: nextState ?? null });
   };
+  const showRun = (run: TesterRun) => {
+    setMode(run.mode);
+    navigate(`/tester?tool=${encodeURIComponent(run.tool)}`, {
+      state: { runId: run.id } satisfies TesterLocationState,
+    });
+  };
 
   return (
     <>
-      <PageHeader
+      <PageTitle
         title="Tester"
-        description="Run a tool by hand: as a model would through call_tool, or raw."
+        info="Run a tool by hand. As the model sees it: exactly as call_tool runs it, with validation, the result size limit, and input requests you can answer here. Raw: straight to the server, with no validation by MCPier, no size limit and no input requests."
+        actions={<ModeSwitch mode={mode} onChange={setMode} />}
       />
       {!selected ? (
-        <ToolPicker onPick={(name) => pick(name)} />
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_260px]">
+          <Panel className="p-3.5">
+            <ToolPicker onPick={(name) => pick(name)} />
+          </Panel>
+          <History onShow={showRun} />
+        </div>
       ) : tools.isPending ? (
         <LoadingRows label="Loading the tool" />
       ) : tools.error ? (
@@ -666,32 +760,13 @@ export function TesterPage() {
           // A new tool, a prefill or a run from the history starts the panel afresh.
           key={`${tool.fullName}:${location.key}`}
           tool={tool}
+          mode={mode}
           initialArguments={state.arguments}
           initialRun={initialRun}
           onChangeTool={() => pick(undefined)}
-          onShowRun={(run) =>
-            navigate(`/tester?tool=${encodeURIComponent(run.tool)}`, {
-              state: { runId: run.id } satisfies TesterLocationState,
-            })
-          }
+          onShowRun={showRun}
         />
       )}
-      {!selected ? <TesterHistoryOnly /> : null}
     </>
-  );
-}
-
-function TesterHistoryOnly() {
-  const navigate = useNavigate();
-  return (
-    <div className={cn('mt-8')}>
-      <History
-        onShow={(run) =>
-          navigate(`/tester?tool=${encodeURIComponent(run.tool)}`, {
-            state: { runId: run.id } satisfies TesterLocationState,
-          })
-        }
-      />
-    </div>
   );
 }

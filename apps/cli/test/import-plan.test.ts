@@ -82,3 +82,18 @@ describe('planImport in ask mode', () => {
     expect(kept.kept).toHaveLength(3);
   });
 });
+
+describe('a plain OAuth client secret in an interactive run', () => {
+  it('is not asked about: it goes to the gateway, which always moves it into a secret', async () => {
+    const prompter = scripted({ confirm: [], ask: [] });
+    const pasted = {
+      mcpServers: {
+        drive: { url: 'https://x.example/mcp', oauth: { clientId: 'a', clientSecret: 'cs-value' } },
+      },
+    };
+    const plan = await planImport(pasted, [], 'ask', prompter);
+    expect(prompter.questions).toEqual([]);
+    expect(plan.moves).toEqual([]);
+    expect(plan.parsed.candidates[0]!.oauth?.clientSecret).toEqual({ kind: 'plain' });
+  });
+});

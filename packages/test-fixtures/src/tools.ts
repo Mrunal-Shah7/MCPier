@@ -40,6 +40,14 @@ export interface FakeToolOptions {
   modernTools?: boolean;
   /** Add `ask_legacy` (2025-style elicitation; legacy server). */
   legacyTools?: boolean;
+  /** What the server says about itself besides its name: logos (SEP-973) and a website. */
+  serverInfo?: FixtureServerInfo;
+}
+
+/** A server's `icons` and `websiteUrl`, as sent in `serverInfo` (both protocol eras). */
+export interface FixtureServerInfo {
+  icons?: { src: string; mimeType?: string; sizes?: string[]; theme?: 'light' | 'dark' }[];
+  websiteUrl?: string;
 }
 
 const text = (value: string) => ({ content: [{ type: 'text' as const, text: value }] });
@@ -47,7 +55,7 @@ const text = (value: string) => ({ content: [{ type: 'text' as const, text: valu
 /** Builds one fake MCP server instance with the shared tool set. */
 export function createFakeServer(name: string, options: FakeToolOptions = {}): McpServer {
   const server = new McpServer(
-    { name, version: FIXTURE_SERVER_VERSION },
+    { name, version: FIXTURE_SERVER_VERSION, ...options.serverInfo },
     {
       capabilities: { logging: {}, tools: { listChanged: true } },
       ...(options.toolsTtlMs !== undefined

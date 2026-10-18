@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { isInitializeRequest, WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server';
 import { listenFixture, notFound, type RunningFixture } from './http-common.js';
-import { createFakeServer } from './tools.js';
+import { createFakeServer, type FixtureServerInfo } from './tools.js';
 
 const jsonRpcError = (status: number, code: number, message: string) =>
   Response.json({ jsonrpc: '2.0', error: { code, message }, id: null }, { status });
@@ -22,7 +22,9 @@ export interface LegacyFixture extends RunningFixture {
  * `initialize` request and addressed afterwards by the `Mcp-Session-Id` header, the way a
  * 2025-era server works. Anything else without a valid session is rejected.
  */
-export async function startLegacyServer(options: { port?: number } = {}): Promise<LegacyFixture> {
+export async function startLegacyServer(
+  options: { port?: number; serverInfo?: FixtureServerInfo } = {},
+): Promise<LegacyFixture> {
   const sessions = new Map<string, WebStandardStreamableHTTPServerTransport>();
 
   const handle = async (request: Request): Promise<Response> => {
@@ -49,7 +51,10 @@ export async function startLegacyServer(options: { port?: number } = {}): Promis
     transport.onclose = () => {
       if (transport.sessionId) sessions.delete(transport.sessionId);
     };
-    await createFakeServer('fake-legacy-http', { legacyTools: true }).connect(transport);
+    await createFakeServer('fake-legacy-http', {
+      legacyTools: true,
+      ...(options.serverInfo ? { serverInfo: options.serverInfo } : {}),
+    }).connect(transport);
     return transport.handleRequest(request, { parsedBody: body });
   };
 

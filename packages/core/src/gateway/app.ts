@@ -28,9 +28,10 @@ import { registerCallLogRoutes } from './call-log-routes.js';
 import { registerDashboardRoutes } from './dashboard-routes.js';
 import { errorToResponse, registerApiRoutes } from './routes.js';
 import { MCP_PATH } from './mcp-endpoint.js';
-import { CALLBACK_CSS, callbackPage, OAUTH_PAGE_HEADERS } from './oauth-page.js';
+import { CALLBACK_CSS, callbackPage, LINK_INVALID_PAGE, OAUTH_PAGE_HEADERS } from './oauth-page.js';
 import { registerOAuthRoutes } from './oauth-routes.js';
 import { serveWeb } from './web.js';
+import type { IconService } from '../icons/service.js';
 
 export interface AppOptions {
   port: number;
@@ -66,6 +67,8 @@ export interface AppServices {
   oauth: OAuthService;
   /** The call and search log (absent when `mcpier.db` could not be used). */
   callLog?: CallLog;
+  /** Server logos (the icon route and the refresh action). */
+  icons: IconService;
   /** Heartbeat interval on the event stream (tests shorten it). */
   heartbeatMs: number;
   /** The port the gateway listens on (for the connect snippets). */
@@ -180,15 +183,6 @@ export const DASHBOARD_SECURITY_HEADERS: Readonly<Record<string, string>> = {
 /** The hand-off and sign-out answers are never cached and never leak a referrer. */
 const AUTH_HEADERS = { 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' } as const;
 
-const LINK_INVALID_PAGE = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>MCPier</title></head>
-<body>
-<h1>MCPier</h1>
-<p>This sign-in link is no longer valid.</p>
-<p>Run <code>mcpier open</code> again to open the dashboard.</p>
-</body></html>
-`;
-
 function withHeaders(response: Response, headers: Readonly<Record<string, string>>): Response {
   const out = new Response(response.body, response);
   for (const [name, value] of Object.entries(headers)) out.headers.set(name, value);
@@ -259,7 +253,8 @@ export function createApp(options: AppOptions): Hono {
     for (const [name, value] of Object.entries(AUTH_HEADERS)) c.header(name, value);
     if (!options.services.handoff.consume(c.req.query('code'))) {
       // Unknown, used, expired or malformed: one answer for all of them.
-      return c.html(LINK_INVALID_PAGE, 400, AUTH_HEADERS);
+      // The same static page and policy as the OAuth callback: own stylesheet, no script.
+      return c.html(LINK_INVALID_PAGE, 400, { ...AUTH_HEADERS, ...OAUTH_PAGE_HEADERS });
     }
     setCookie(c, ADMIN_COOKIE_NAME, options.token, { path: '/', httpOnly: true, sameSite: 'Strict' });
     options.logger.info('Dashboard signed in');

@@ -8,10 +8,13 @@ import {
   type SecretListResponse,
   type SecretSetResponse,
 } from '@mcpier/shared';
-import { PlusIcon, TriangleAlertIcon } from 'lucide-react';
+import { LockIcon, PlusIcon, Trash2Icon, TriangleAlertIcon } from 'lucide-react';
 import { api, describeError } from '@/lib/api';
-import { queryKeys, useSecrets } from '@/lib/queries';
-import { EmptyState, ErrorMessage, LoadingRows, PageHeader } from '@/components/common';
+import { queryKeys, useSecrets, useServers } from '@/lib/queries';
+import { EmptyState, ErrorMessage, LoadingRows } from '@/components/common';
+import { PageTitle, Panel, PanelBody, PanelHeader, RailGrid, Stack } from '@/components/kit';
+import { ServerTile } from '@/components/server-tile';
+import { SecretChip, ToneBadge } from '@/components/status-badge';
 import { useToast } from '@/components/toaster';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -95,7 +98,7 @@ function SetSecretDialog({
                 onChange={(event) => setName(event.target.value)}
               />
               {nameProblem ? (
-                <p className="text-destructive text-xs">Name {nameProblem}.</p>
+                <p className="text-tone-bad-text text-xs">Name {nameProblem}.</p>
               ) : (
                 <p className="text-muted-foreground text-xs">
                   Referenced in config as secret:{name || '<name>'}
@@ -112,7 +115,7 @@ function SetSecretDialog({
               value={value}
               onChange={(event) => setValue(event.target.value)}
             />
-            {valueProblem ? <p className="text-destructive text-xs">The value {valueProblem}.</p> : null}
+            {valueProblem ? <p className="text-tone-bad-text text-xs">The value {valueProblem}.</p> : null}
           </div>
           {set.error ? <ErrorMessage error={set.error} title="Could not save the secret" /> : null}
           <DialogFooter>
@@ -172,7 +175,7 @@ function DeleteSecretDialog({ secret, onClose }: { secret: Secret | undefined; o
             <div className="space-y-2">
               <p>The value is removed from Credential Manager. This cannot be undone.</p>
               {used ? (
-                <p className="text-destructive">
+                <p className="text-tone-bad-text">
                   Used by {secret!.usedBy.join(', ')}.{' '}
                   {secret!.usedBy.length === 1 ? 'That server' : 'Those servers'} will stop with a
                   missing-secret error.
@@ -211,21 +214,42 @@ function DeleteSecretDialog({ secret, onClose }: { secret: Secret | undefined; o
 
 export function SecretsPage() {
   const secrets = useSecrets();
+  const servers = useServers();
   const [creating, setCreating] = useState(false);
   const [replacing, setReplacing] = useState<string | undefined>();
   const [deleting, setDeleting] = useState<Secret | undefined>();
+  const iconOf = (name: string) => servers.data?.servers.find((server) => server.name === name)?.icon;
   const newButton = (
     <Button onClick={() => setCreating(true)}>
       <PlusIcon aria-hidden="true" />
       New secret
     </Button>
   );
+  const usedBy = (names: string[]) =>
+    names.length === 0 ? (
+      <span className="text-faint">nothing</span>
+    ) : (
+      <span className="flex flex-wrap gap-x-3 gap-y-1">
+        {names.map((name) => (
+          <span key={name} className="inline-flex items-center gap-1.5">
+            <ServerTile name={name} icon={iconOf(name)} size="sm" />
+            {name}
+          </span>
+        ))}
+      </span>
+    );
 
   return (
     <>
-      <PageHeader
+      <PageTitle
         title="Secrets"
-        description="Values kept in Windows Credential Manager. Config refers to them as secret:<name>; the values never leave MCPier."
+        info="Values kept in Windows Credential Manager. Config refers to them as secret:<name>; the values never leave MCPier."
+        meta={
+          <span className="text-faint flex items-center gap-1.5 text-xs">
+            <LockIcon aria-hidden="true" className="size-3.5" />
+            Windows Credential Manager
+          </span>
+        }
         actions={newButton}
       />
       {secrets.isPending ? (
@@ -233,77 +257,103 @@ export function SecretsPage() {
       ) : secrets.error ? (
         <ErrorMessage error={secrets.error} title="Cannot load the secrets" />
       ) : (
-        <div className="space-y-6">
-          {secrets.data.missing.length > 0 ? (
-            <div role="alert" className="border-destructive/40 space-y-1 rounded-md border p-3 text-sm">
-              <p className="flex items-center gap-2 font-medium">
-                <TriangleAlertIcon className="text-destructive size-4" aria-hidden="true" />
-                Referenced but not set
-              </p>
-              <ul className="space-y-1">
-                {secrets.data.missing.map((missing) => (
-                  <li
-                    key={missing.name}
-                    className="flex flex-wrap items-center gap-2"
-                    data-missing={missing.name}
-                  >
-                    <span className="font-mono">{missing.name}</span>
-                    <span className="text-muted-foreground">used by {missing.usedBy.join(', ')}</span>
-                    <Button size="sm" variant="outline" onClick={() => setReplacing(missing.name)}>
-                      Set it
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {secrets.data.secrets.length === 0 ? (
-            <EmptyState title="No secrets yet" action={newButton}>
-              Add one here, or from a terminal with{' '}
-              <code className="font-mono">mcpier secret set &lt;name&gt;</code>.
-            </EmptyState>
-          ) : (
-            <div className="overflow-x-auto rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Ends with</TableHead>
-                    <TableHead>Used by</TableHead>
-                    <TableHead className="w-48">
-                      <span className="sr-only">Actions</span>
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {secrets.data.secrets.map((secret) => (
-                    <TableRow key={secret.name} data-secret={secret.name}>
-                      <TableCell className="font-mono text-sm">{secret.name}</TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {secret.last4 ? `…${secret.last4}` : '—'}
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {secret.usedBy.length > 0 ? (
-                          secret.usedBy.join(', ')
-                        ) : (
-                          <span className="text-muted-foreground">nothing</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="space-x-2 text-right">
-                        <Button size="sm" variant="outline" onClick={() => setReplacing(secret.name)}>
-                          Replace
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setDeleting(secret)}>
-                          Delete
-                        </Button>
-                      </TableCell>
-                    </TableRow>
+        <RailGrid>
+          <Stack>
+            {secrets.data.missing.length > 0 ? (
+              <div
+                role="alert"
+                className="border-tone-warn/35 bg-tone-warn-soft text-tone-warn-text rounded-[10px] border px-3.5 py-2.5 text-sm"
+              >
+                <p className="m-0 flex items-center gap-2 font-semibold">
+                  <TriangleAlertIcon className="size-4" aria-hidden="true" />
+                  <span>Referenced but not set</span>
+                </p>
+                <ul className="m-0 mt-1 list-none space-y-0.5 p-0 pl-6">
+                  {secrets.data.missing.map((missing) => (
+                    <li key={missing.name}>
+                      <span className="font-mono">{missing.name}</span>, used by {missing.usedBy.join(', ')}
+                    </li>
                   ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </div>
+                </ul>
+              </div>
+            ) : null}
+            {secrets.data.secrets.length === 0 && secrets.data.missing.length === 0 ? (
+              <EmptyState title="No secrets yet" action={newButton}>
+                Store API keys and tokens here, then refer to them in a server as secret:&lt;name&gt;.
+              </EmptyState>
+            ) : (
+              <Panel className="overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Value</TableHead>
+                      <TableHead>Used by</TableHead>
+                      <TableHead className="w-48">
+                        <span className="sr-only">Actions</span>
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {secrets.data.missing.map((missing) => (
+                      <TableRow key={missing.name} data-missing={missing.name} className="edge-warn">
+                        <TableCell>
+                          <SecretChip name={missing.name} missing />
+                        </TableCell>
+                        <TableCell>
+                          <ToneBadge tone="warn">Missing</ToneBadge>
+                        </TableCell>
+                        <TableCell className="text-sm whitespace-normal">
+                          <span className="text-faint">referenced by {missing.usedBy.join(', ')}</span>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button size="sm" onClick={() => setReplacing(missing.name)}>
+                            Set it
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {secrets.data.secrets.map((secret) => (
+                      <TableRow key={secret.name} data-secret={secret.name}>
+                        <TableCell>
+                          <SecretChip name={secret.name} />
+                          <span className="sr-only">{secret.name}</span>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground font-mono text-xs">
+                          {secret.last4 ? `••••${secret.last4}` : '••••'}
+                        </TableCell>
+                        <TableCell className="text-sm whitespace-normal">{usedBy(secret.usedBy)}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1.5">
+                            <Button size="sm" variant="outline" onClick={() => setReplacing(secret.name)}>
+                              Replace
+                            </Button>
+                            <Button size="sm" variant="destructive-ghost" onClick={() => setDeleting(secret)}>
+                              <Trash2Icon aria-hidden="true" />
+                              Delete
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Panel>
+            )}
+          </Stack>
+          <Panel aria-label="How secrets work">
+            <PanelHeader title="How secrets work" />
+            <PanelBody className="text-muted-foreground space-y-2 text-sm">
+              <p className="m-0">
+                Reference one in a server's env or header as <SecretChip name="name" />.
+              </p>
+              <p className="m-0">Values are resolved in memory and redacted from results and logs.</p>
+              <p className="m-0">
+                From a terminal: <code className="font-mono text-xs">mcpier secret set &lt;name&gt;</code>
+              </p>
+            </PanelBody>
+          </Panel>
+        </RailGrid>
       )}
       <SetSecretDialog open={creating} onOpenChange={setCreating} />
       <SetSecretDialog

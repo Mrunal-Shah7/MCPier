@@ -220,14 +220,6 @@ export function prettyBody(text: string): string {
   }
 }
 
-/** The outcome's colour group. */
-export function outcomeTone(outcome: CallOutcomeName): 'ok' | 'info' | 'warn' | 'error' {
-  if (outcome === 'ok') return 'ok';
-  if (outcome === 'input_required') return 'info';
-  if (outcome === 'tool_error' || outcome === 'validation_error' || outcome === 'cancelled') return 'warn';
-  return 'error';
-}
-
 export const OUTCOME_LABELS: Record<CallOutcomeName, string> = {
   ok: 'OK',
   tool_error: 'Tool error',

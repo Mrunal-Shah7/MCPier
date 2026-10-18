@@ -3,7 +3,10 @@ import {
   jsonErrorMessage,
   API_PATHS,
   DEFAULT_STARTUP_TIMEOUT_MS,
+  isSecretRef,
   PROTOCOL_MODES,
+  scopeProblem,
+  splitScopes,
   type ImportResponse,
   type ServerDetailResponse,
   type ServerListResponse,
@@ -146,6 +149,11 @@ function positiveInt(value: string | undefined, option: string): number | undefi
 export interface ServerAddOptions {
   url?: string;
   oauth?: boolean;
+  /** Repeatable; a value with spaces is split into several scopes. */
+  scope?: string[];
+  clientId?: string;
+  /** Only `secret:<name>`: a plain value is refused and never echoed. */
+  clientSecret?: string;
   description?: string;
   env?: string[];
   header?: string[];
@@ -167,6 +175,29 @@ export async function serverAdd(name: string, command: string[], options: Server
   if (options.protocol && !(PROTOCOL_MODES as readonly string[]).includes(options.protocol)) {
     throw new CliError(`--protocol must be one of: ${PROTOCOL_MODES.join(', ')}.`);
   }
+  // The OAuth client flags imply --oauth, and only make sense for a remote server.
+  const scopes = splitScopes(...(options.scope ?? []));
+  const oauthFlags =
+    scopes.length > 0 || options.clientId !== undefined || options.clientSecret !== undefined;
+  if (oauthFlags && !options.url) {
+    throw new CliError('--scope, --client-id and --client-secret are for remote servers (--url).');
+  }
+  for (const scope of scopes) {
+    const problem = scopeProblem(scope);
+    if (problem) throw new CliError(`--scope "${scope}" ${problem}.`);
+  }
+  if (options.clientSecret !== undefined && !isSecretRef(options.clientSecret, 'env')) {
+    // Never echo the value: it may be a real client secret typed by mistake.
+    throw new CliError(
+      '--client-secret takes only a reference, such as secret:<name>, never the secret itself.',
+      {
+        hint: 'Store it first with: mcpier secret set <name>, then pass --client-secret secret:<name>',
+      },
+    );
+  }
+  if (options.clientSecret !== undefined && options.clientId === undefined) {
+    throw new CliError('--client-secret needs --client-id too: a client secret belongs to a client ID.');
+  }
   const entry: Record<string, unknown> = { name };
   if (options.description) entry.description = options.description;
   if (options.disabled) entry.enabled = false;
@@ -183,7 +214,14 @@ export async function serverAdd(name: string, command: string[], options: Server
       url: options.url,
       headers: collectPairs(options.header ?? [], ':', 'Header'),
     });
-    if (options.oauth) entry.auth = 'oauth';
+    if (options.oauth || oauthFlags) entry.auth = 'oauth';
+    if (oauthFlags) {
+      entry.oauth = {
+        ...(options.clientId !== undefined ? { clientId: options.clientId } : {}),
+        ...(options.clientSecret !== undefined ? { clientSecret: options.clientSecret } : {}),
+        ...(scopes.length > 0 ? { scopes } : {}),
+      };
+    }
   } else {
     if (options.header?.length || options.oauth) {
       throw new CliError('--header and --oauth are for remote servers (--url).');
@@ -248,9 +286,12 @@ export async function serverImport(file: string, options: ServerImportOptions): 
       await api.request('PUT', API_PATHS.secret(move.secretName), { value: move.value });
     }
   }
+  // A plain OAuth client secret is moved into a secret by the gateway itself (the same planner
+  // as the dashboard), never kept as plain text; --keep-secrets refuses such an entry.
   const result = await api.request<ImportResponse>('POST', API_PATHS.import, {
     source: plan.source,
     dryRun: options.dryRun === true,
+    ...(options.keepSecrets ? { keepSecrets: true } : {}),
   });
 
   const verb = options.dryRun ? 'Would create' : 'Created';
@@ -260,6 +301,22 @@ export async function serverImport(file: string, options: ServerImportOptions): 
         ? [entry.entry.command, ...((entry.entry.args as string[]) ?? [])].join(' ')
         : String(entry.entry.url);
     console.log(`${verb} ${entry.name} (${entry.entry.transport}): ${target}`);
+    if (entry.oauth) {
+      const details = [
+        entry.oauth.clientId ? `client ID ${entry.oauth.clientId}` : undefined,
+        entry.oauth.scopes.length > 0 ? `scopes ${entry.oauth.scopes.join(' ')}` : undefined,
+      ].filter(Boolean);
+      console.log(`  OAuth detected${details.length > 0 ? `: ${details.join(', ')}` : ''}`);
+      const secret = entry.oauth.clientSecret;
+      if (secret?.kind === 'plain' && secret.movedTo) {
+        console.log(
+          `  clientSecret → secret:${secret.movedTo} (${options.dryRun ? 'would be stored' : 'stored'} in Credential Manager)`,
+        );
+      } else if (secret?.kind === 'reference') {
+        console.log(`  clientSecret → ${secret.reference}`);
+      }
+    }
+    for (const note of entry.notes ?? []) console.log(`  Note: ${note}`);
     if (entry.ignored.length > 0) console.log(`  Ignored fields: ${entry.ignored.join(', ')}`);
   }
   for (const move of plan.moves) {

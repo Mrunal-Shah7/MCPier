@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { API_PATHS, DASHBOARD_API_PATHS, type SessionCodeResponse } from '@mcpier/shared';
-import { fixtureScripts, startOAuthFixture, type OAuthFixture } from '@mcpier/test-fixtures';
+import { fixtureScripts, solidPng, startOAuthFixture, type OAuthFixture } from '@mcpier/test-fixtures';
 import { FAST_TIMING, startTestGateway, waitForStatus, type TestGateway } from '../helpers/gateway.js';
 
 const webRoot = fileURLToPath(new URL('../../apps/web/dist', import.meta.url));
@@ -40,6 +40,17 @@ describe.runIf(edgeInstalled && built)('dashboard in Edge', () => {
             command: process.execPath,
             args: [fixtureScripts.stdio],
             description: 'Fixture files',
+            // Sprint 7: the fixture announces a logo (a data: URI), which MCPier caches and serves.
+            env: {
+              MCPIER_FIXTURE_SERVER_INFO: JSON.stringify({
+                icons: [
+                  {
+                    src: `data:image/png;base64,${solidPng(32, [16, 185, 129]).toString('base64')}`,
+                    mimeType: 'image/png',
+                  },
+                ],
+              }),
+            },
           },
           { name: 'spare', transport: 'stdio', command: process.execPath, args: [fixtureScripts.stdio] },
         ],
@@ -78,6 +89,13 @@ describe.runIf(edgeInstalled && built)('dashboard in Edge', () => {
     await oauth?.close();
   });
 
+  // Sprint 7: sidebar links carry counts ("Servers 2"); pages also link back by name.
+  const nav = (name: string) =>
+    page
+      .getByRole('navigation', { name: 'Main' })
+      .getByRole('link', { name: new RegExp(`^${name}\\b`) })
+      .click();
+
   const api = (method: string, path: string) =>
     fetch(`${t.gateway.url}${path}`, { method, headers: { authorization: `Bearer ${t.token}` } });
 
@@ -91,13 +109,19 @@ describe.runIf(edgeInstalled && built)('dashboard in Edge', () => {
     await page.waitForURL(`${t.gateway.url}/servers`);
     await page.getByRole('link', { name: 'files', exact: true }).waitFor();
     await page.getByRole('link', { name: 'spare', exact: true }).waitFor();
+    // Sprint 7: the fixture's logo is drawn from the icon route; spare has the letter tile.
+    const logo = page.locator('[data-server="files"] img[data-tile="icon"]');
+    await logo.waitFor({ timeout: 15_000 });
+    expect(await logo.getAttribute('src')).toMatch(/^\/api\/servers\/files\/icon\?v=/);
+    await expect.poll(() => logo.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(32);
+    await page.locator('[data-server="spare"] [data-tile="letter"]').waitFor();
     expect(page.url()).not.toContain('code=');
   }, 30_000);
 
   it('2. adds a stdio fixture server through the form, tests it, saves it; it reaches ready', async () => {
     await page.getByRole('link', { name: 'Add server' }).first().click();
-    await page.getByLabel('Name').fill('added');
-    await page.getByLabel('Command').fill(process.execPath);
+    await page.getByLabel('Name', { exact: true }).fill('added');
+    await page.getByLabel('Command', { exact: true }).fill(process.execPath);
     await page.getByRole('button', { name: 'Add argument' }).click();
     await page.getByLabel('Argument 1').fill(fixtureScripts.stdio);
     await page.getByRole('button', { name: 'Test connection' }).click();
@@ -111,7 +135,7 @@ describe.runIf(edgeInstalled && built)('dashboard in Edge', () => {
     await page.getByRole('tab', { name: /Tools/ }).click();
     await page.getByRole('switch', { name: 'Disable added__echo' }).click();
     await page.getByRole('switch', { name: 'Enable added__echo' }).waitFor();
-    await page.getByRole('link', { name: 'Tools' }).click();
+    await nav('Tools');
     await page.getByRole('tab', { name: 'Catalog' }).click();
     const row = page.locator('[data-tool="added__echo"]');
     await expect.poll(() => row.getByRole('switch').getAttribute('aria-checked')).toBe('false');
@@ -125,7 +149,7 @@ describe.runIf(edgeInstalled && built)('dashboard in Edge', () => {
   }, 60_000);
 
   it('4. a server stopped from outside the browser changes on the page without a reload', async () => {
-    await page.getByRole('link', { name: 'Servers' }).click();
+    await nav('Servers');
     const row = page.locator('[data-server="spare"]');
     await row.locator('[data-status="ready"]').waitFor();
     const before = await page.evaluate(() => performance.getEntriesByType('navigation').length);
@@ -145,12 +169,12 @@ describe.runIf(edgeInstalled && built)('dashboard in Edge', () => {
   }, 30_000);
 
   it('5b. adds the OAuth fixture server, signs in through a new tab, reaches ready, signs out', async () => {
-    await page.getByRole('link', { name: 'Servers' }).click();
+    await nav('Servers');
     await page.getByRole('link', { name: 'Add server' }).first().click();
-    await page.getByLabel('Name').fill('notion');
-    await page.getByLabel('Transport').selectOption({ label: 'HTTP (a remote URL)' });
+    await page.getByLabel('Name', { exact: true }).fill('notion');
+    await page.getByRole('group', { name: 'Transport' }).getByRole('button', { name: 'http' }).click();
     await page.getByLabel('URL', { exact: true }).fill(oauth.mcpUrl);
-    await page.getByLabel('Sign-in').selectOption({ label: 'OAuth' });
+    await page.getByRole('group', { name: 'Sign-in' }).getByRole('button', { name: 'OAuth' }).click();
     await page.getByRole('button', { name: 'Test connection' }).click();
     await page.getByText('OAuth discovery worked').waitFor({ timeout: 20_000 });
     await page.getByRole('button', { name: 'Save server' }).click();
@@ -184,7 +208,7 @@ describe.runIf(edgeInstalled && built)('dashboard in Edge', () => {
     await section.getByRole('button', { name: 'Forget registration…' }).click();
     await page.getByRole('alertdialog').getByText('The next sign-in registers MCPier again.').waitFor();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
-    await page.getByRole('link', { name: 'Servers' }).click();
+    await nav('Servers');
     await page.getByRole('button', { name: 'Actions for notion' }).click();
     await page.getByRole('menuitem', { name: 'Sign in…' }).waitFor();
     await page.keyboard.press('Escape');
@@ -192,7 +216,7 @@ describe.runIf(edgeInstalled && built)('dashboard in Edge', () => {
 
   it('5c. a Tester run (model mode) appears live in the Call log; its detail opens it in the Tester again', async () => {
     // The Call log stays open in the first tab while a second tab runs the tool.
-    await page.getByRole('link', { name: 'Call log' }).click();
+    await nav('Call log');
     await page
       .getByRole('table', { name: 'Calls' })
       .or(page.getByText('No calls match these filters'))
@@ -230,6 +254,94 @@ describe.runIf(edgeInstalled && built)('dashboard in Edge', () => {
     await expect.poll(() => page.getByLabel(/^text/).inputValue()).toBe('from the tester e2e');
   }, 60_000);
 
+  it('5d. Usage: each range shows its charts', async () => {
+    await nav('Usage');
+    await page.getByRole('img', { name: /^Calls per day: 7 points/ }).waitFor();
+    const range = page.getByRole('group', { name: 'Range' });
+    await range.getByRole('button', { name: '24 h' }).click();
+    await page.waitForURL(/\/usage\?range=24h$/);
+    await page.getByRole('img', { name: /^Calls per hour: \d+ points/ }).waitFor();
+    await range.getByRole('button', { name: '30 days' }).click();
+    await page.waitForURL(/\/usage\?range=30d$/);
+    await page.getByRole('img', { name: /^Calls per day: 30 points/ }).waitFor();
+    // The Tester run of step 5c counts for files.
+    await page.getByRole('list', { name: /^Estimated tokens by server: .*files/ }).waitFor();
+  }, 30_000);
+
+  it("5e. a Tester run appears live on its server's Activity tab", async () => {
+    await page.goto(`${t.gateway.url}/servers/files?tab=activity`);
+    const table = page.getByRole('table', { name: 'Server calls' });
+    await table.waitFor();
+    const before = await page.evaluate(() => performance.getEntriesByType('navigation').length);
+    const known = await table.locator('[data-call]').count();
+
+    const tester = await page.context().newPage();
+    await tester.goto(`${t.gateway.url}/tester?tool=files__echo`);
+    await tester.getByLabel(/^text/).fill('from the activity e2e');
+    await tester.getByRole('status', { name: 'Validation' }).getByText('The arguments match').waitFor();
+    await tester.getByRole('button', { name: 'Run' }).click();
+    await tester.getByRole('region', { name: 'Result' }).getByText('from the activity e2e').waitFor();
+    await tester.close();
+
+    await expect.poll(() => table.locator('[data-call]').count(), { timeout: 10_000 }).toBe(known + 1);
+    expect(await page.evaluate(() => performance.getEntriesByType('navigation').length)).toBe(before);
+    await table
+      .locator('[data-call]')
+      .first()
+      .getByRole('button', { name: /^Details of call \d+ \(files__echo\)$/ })
+      .click();
+    await page
+      .getByRole('region', { name: 'Call detail' })
+      .getByLabel('Arguments')
+      .getByText('from the activity e2e')
+      .waitFor();
+  }, 60_000);
+
+  it('5f. edits a server in JSON, saves it, and the Form tab shows the change', async () => {
+    await page.goto(`${t.gateway.url}/servers/spare/edit`);
+    await page.getByRole('tab', { name: 'JSON' }).click();
+    const editor = page.getByLabel('spare as JSON');
+    await expect.poll(() => editor.inputValue()).toContain('"name": "spare"');
+    const entry = JSON.parse(await editor.inputValue()) as Record<string, unknown>;
+    expect(entry.name).toBe('spare');
+    await editor.fill(JSON.stringify({ ...entry, description: 'Edited as JSON' }, null, 2));
+    await page.locator('[data-json-state="valid"]').waitFor();
+    await page.getByRole('button', { name: 'Save JSON' }).click();
+    await page.getByText('Saved spare.', { exact: true }).waitFor();
+    await page.getByRole('tab', { name: 'Form' }).click();
+    await expect
+      .poll(() => page.getByLabel('Description', { exact: true }).inputValue())
+      .toBe('Edited as JSON');
+    const savedDescription = () =>
+      (
+        JSON.parse(readFileSync(t.home.paths.config, 'utf8')) as {
+          servers: { name: string; description?: string }[];
+        }
+      ).servers.find((server) => server.name === 'spare')?.description;
+    await expect.poll(savedDescription).toBe('Edited as JSON');
+  }, 30_000);
+
+  it('5g. a delete dialog opens, its button stays red on hover, and Cancel deletes nothing', async () => {
+    // Saved: leaving the edit page asks nothing (a dialog here would be dismissed and block it).
+    await nav('Servers');
+    await page.waitForURL(`${t.gateway.url}/servers`);
+    await page.getByRole('button', { name: 'Actions for spare' }).click();
+    await page.getByRole('menuitem', { name: 'Delete…' }).click();
+    const dialog = page.getByRole('alertdialog');
+    await dialog.getByText('Delete spare?').waitFor();
+    const remove = dialog.getByRole('button', { name: 'Delete spare' });
+    const background = () => remove.evaluate((element) => getComputedStyle(element).backgroundColor);
+    await page.mouse.move(1, 1);
+    await expect.poll(background).toBe('rgb(244, 63, 94)');
+    await remove.hover();
+    await expect.poll(background).toBe('rgb(225, 29, 72)');
+    expect(await remove.evaluate((element) => getComputedStyle(element).color)).toBe('rgb(255, 255, 255)');
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await dialog.waitFor({ state: 'detached' });
+    await page.locator('[data-server="spare"]').getByRole('link', { name: 'spare', exact: true }).waitFor();
+    expect((await api('GET', API_PATHS.server('spare'))).status).toBe(200);
+  }, 30_000);
+
   // For the visual check (set MCPIER_E2E_SHOTS to a folder): pages with the fake secret store,
   // which manual runs cannot use, in both themes at two widths.
   it.runIf(process.env.MCPIER_E2E_SHOTS)(
@@ -238,7 +350,7 @@ describe.runIf(edgeInstalled && built)('dashboard in Edge', () => {
       const dir = process.env.MCPIER_E2E_SHOTS!;
       await t.secrets.set('demo-token', 'demo-token-value-0000-1111');
       for (const scheme of ['light', 'dark'] as const) {
-        for (const width of [1280, 390]) {
+        for (const width of [1600, 1280, 390]) {
           await page.emulateMedia({ colorScheme: scheme });
           await page.setViewportSize({ width, height: 900 });
           for (const path of [

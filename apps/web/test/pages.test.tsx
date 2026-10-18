@@ -11,6 +11,9 @@ const failing = (message: string) => () => ({
   body: { error: { code: 'internal_error', message } },
 });
 const never = () => new Promise<never>(() => {});
+// Sprint 7: a server's name also shows in the Needs attention rail; this is its table row.
+const rowOf = async (name: string) =>
+  (await screen.findAllByText(name)).map((element) => element.closest('tr')).find((row) => row !== null)!;
 
 function tool(name: string, overrides: Partial<ToolInfo> = {}): ToolInfo {
   return {
@@ -67,7 +70,7 @@ describe('Servers page', () => {
     });
     const user = userEvent.setup();
     renderApp('/servers');
-    const row = (await screen.findByText('files')).closest('tr')!;
+    const row = await rowOf('files');
     expect(within(row).getByText('Stopped')).toBeInTheDocument();
     expect(within(row).getByText('Local files')).toBeInTheDocument();
     await user.click(within(row).getByRole('button', { name: 'Actions for files' }));
@@ -113,7 +116,8 @@ describe('Servers page', () => {
     await user.click(await screen.findByRole('button', { name: 'Actions for files' }));
     await user.click(await screen.findByRole('menuitem', { name: 'Enable' }));
     expect(await screen.findByText('Could not enable files')).toBeInTheDocument();
-    expect(screen.getByText(/fix the file first/)).toBeInTheDocument();
+    // The toast's screen-reader announcement may briefly repeat the text (Sprint 7: seen under load).
+    expect(screen.getAllByText(/fix the file first/).length).toBeGreaterThan(0);
   });
 });
 
@@ -149,7 +153,8 @@ describe('Tools page', () => {
     await user.click(screen.getByRole('button', { name: 'Search' }));
     const results = await screen.findByRole('list', { name: 'Search results' });
     const items = within(results).getAllByRole('listitem');
-    expect(items[0]).toHaveTextContent('1files__read_text_fileavailable');
+    // Sprint 7: each result also shows the server tile and the description.
+    expect(items[0]).toHaveTextContent(/^1.*files__read_text_file.*available$/);
     expect(items[1]).toHaveTextContent('gh__read_file');
     expect(within(items[1]!).getByText('Needs sign-in')).toBeInTheDocument();
     const search = calls.find((call) => call.path.startsWith('/api/tools/search'))!;
@@ -201,8 +206,10 @@ describe('Tools page', () => {
     );
     await user.click(within(table).getByRole('switch', { name: 'Enable files__write_file' }));
     await waitFor(() => expect(toggled).toBe('/api/tools/files__write_file/enable'));
-    // Filter: unavailable only.
-    await user.selectOptions(screen.getByLabelText('Available'), 'Unavailable');
+    // Filter: unavailable only (Sprint 7: a segmented control instead of a select).
+    await user.click(
+      within(screen.getByRole('group', { name: 'Available' })).getByRole('button', { name: 'Unavailable' }),
+    );
     await waitFor(() => expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(2));
   });
 

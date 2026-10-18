@@ -59,6 +59,18 @@ describe('security review: every registered route', () => {
     expect(routes().filter((route) => isApi(route.path)).length).toBeGreaterThanOrEqual(40);
   });
 
+  it("Sprint 7's routes are among them, so the checks below cover them", () => {
+    const all = routes().map((route) => `${route.method} ${route.path}`);
+    for (const route of [
+      'GET /api/usage',
+      'GET /api/servers/:name/icon',
+      'POST /api/servers/:name/icon/refresh',
+      'PUT /api/servers/:name',
+    ]) {
+      expect(all).toContain(route);
+    }
+  });
+
   it('every /api route answers 401 without the token (and with a wrong one)', async () => {
     for (const route of routes().filter((entry) => isApi(entry.path))) {
       const path = concrete(route.path);

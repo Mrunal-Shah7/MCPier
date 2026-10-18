@@ -1,3 +1,4 @@
+import { splitScopes } from './oauth.js';
 import { isSecretRef } from './secrets.js';
 import { SLUG_MAX_LENGTH, slugProblem } from './slug.js';
 
@@ -21,6 +22,21 @@ export interface ImportCandidate {
   ignored: string[];
   /** Plain values that look like credentials (candidates for Credential Manager). */
   sensitive: SensitiveValue[];
+  /** Things the user should know about this entry (an OAuth block dropped or ignored). */
+  notes?: string[];
+  /** An OAuth sign-in was detected (an `oauth` block, `"oauth": true` or `"auth": "oauth"`). */
+  oauth?: ImportOAuth;
+}
+
+/** What the importer understood of an entry's OAuth settings (no secret value). */
+export interface ImportOAuth {
+  clientId?: string;
+  scopes: string[];
+  /**
+   * The client secret: a reference given as one, or a plain value that is always moved into a
+   * secret (`movedTo` names it once planned). The value itself is never part of this.
+   */
+  clientSecret?: { kind: 'reference'; reference: string } | { kind: 'plain'; movedTo?: string };
 }
 
 export interface ImportProblem {
@@ -67,7 +83,92 @@ export function proposedSecretName(server: string, key: string): string {
 }
 
 const STDIO_FIELDS = new Set(['command', 'args', 'env', 'type', 'description', 'disabled']);
-const HTTP_FIELDS = new Set(['url', 'serverUrl', 'headers', 'type', 'description', 'disabled']);
+const HTTP_FIELDS = new Set([
+  'url',
+  'serverUrl',
+  'headers',
+  'type',
+  'description',
+  'disabled',
+  'oauth',
+  'auth',
+]);
+const OAUTH_FIELDS = new Set([
+  'clientId',
+  'client_id',
+  'clientSecret',
+  'client_secret',
+  'scopes',
+  'scope',
+  'enabled',
+]);
+
+interface OAuthRead {
+  /** OAuth was asked for and is enabled. */
+  oauth?: ImportOAuth & { clientSecretValue?: string };
+  /** Fields of the block, ignored by name (`oauth.redirectUri`). */
+  ignored: string[];
+  notes: string[];
+}
+
+/**
+ * The OAuth settings of an HTTP entry: `"oauth": { … }`, `"oauth": true`, `"auth": "oauth"`, or
+ * `"auth": { "type": "oauth", … }`. A block's fields: `clientId`/`client_id`,
+ * `clientSecret`/`client_secret`, `scopes`/`scope` (a list or a space-separated string),
+ * `enabled`. With `"enabled": false` the block is dropped (and a plain secret with it).
+ */
+function readOAuth(raw: Record<string, unknown>): OAuthRead {
+  const out: OAuthRead = { ignored: [], notes: [] };
+  let block: Record<string, unknown> | undefined;
+  let prefix = 'oauth';
+  if (raw.oauth === true || raw.auth === 'oauth') block = {};
+  if (isRecord(raw.oauth)) block = raw.oauth;
+  else if (raw.oauth !== undefined && raw.oauth !== true && raw.oauth !== false) out.ignored.push('oauth');
+  if (isRecord(raw.auth)) {
+    if (typeof raw.auth.type === 'string' && raw.auth.type.toLowerCase() === 'oauth') {
+      const { type: _type, ...rest } = raw.auth;
+      block = { ...rest, ...(block ?? {}) };
+      prefix = isRecord(raw.oauth) ? 'oauth' : 'auth';
+    } else out.ignored.push('auth');
+  } else if (raw.auth !== undefined && raw.auth !== 'oauth' && raw.auth !== 'none') out.ignored.push('auth');
+  if (!block) return out;
+
+  for (const key of Object.keys(block)) if (!OAUTH_FIELDS.has(key)) out.ignored.push(`${prefix}.${key}`);
+  const text = (...keys: string[]) => {
+    for (const key of keys) if (typeof block[key] === 'string' && block[key] !== '') return block[key];
+    return undefined;
+  };
+  const clientId = text('clientId', 'client_id');
+  const clientSecret = text('clientSecret', 'client_secret');
+  const rawScopes = block.scopes ?? block.scope;
+  const scopes = Array.isArray(rawScopes)
+    ? splitScopes(rawScopes.filter((scope): scope is string => typeof scope === 'string'))
+    : typeof rawScopes === 'string'
+      ? splitScopes(rawScopes)
+      : [];
+
+  if (block.enabled === false) {
+    const dropped = [
+      clientId && 'clientId',
+      clientSecret && 'clientSecret',
+      scopes.length > 0 && 'scopes',
+    ].filter(Boolean);
+    out.notes.push(
+      `OAuth is turned off in this entry ("enabled": false), so it was not set up${dropped.length > 0 ? `; dropped: ${dropped.join(', ')}` : ''}.`,
+    );
+    return out;
+  }
+  out.oauth = {
+    ...(clientId !== undefined ? { clientId } : {}),
+    scopes,
+    ...(clientSecret !== undefined
+      ? isSecretRef(clientSecret, 'env')
+        ? { clientSecret: { kind: 'reference' as const, reference: clientSecret } }
+        : { clientSecret: { kind: 'plain' as const }, clientSecretValue: clientSecret }
+      : {}),
+  };
+  return out;
+}
 const HTTP_TYPES = new Set(['http', 'streamable-http', 'streamablehttp', 'streamable_http']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -118,12 +219,17 @@ function convert(key: string, name: string, raw: Record<string, unknown>): Impor
       throw new Error('"args" must be a list of strings');
     }
     const env = stringMap(raw.env, 'env');
+    const hasOAuth = raw.oauth !== undefined || raw.auth !== undefined;
     return {
       key,
       name,
       entry: { name, ...common, transport: 'stdio', command: raw.command, args, env },
       ignored: Object.keys(raw).filter((field) => !STDIO_FIELDS.has(field)),
       sensitive: sensitiveOf(env, 'env'),
+      // OAuth is for remote servers; a stdio server's block is ignored.
+      ...(hasOAuth
+        ? { notes: ['OAuth settings are for remote servers; they were ignored for this stdio server.'] }
+        : {}),
     };
   }
 
@@ -133,14 +239,32 @@ function convert(key: string, name: string, raw: Record<string, unknown>): Impor
     if (type !== undefined && !HTTP_TYPES.has(type))
       throw new Error(`has a URL but an unknown "type": "${raw.type}"`);
     const headers = stringMap(raw.headers, 'headers');
-    const ignored = Object.keys(raw).filter((field) => !HTTP_FIELDS.has(field));
+    const auth = readOAuth(raw);
+    const ignored = [...Object.keys(raw).filter((field) => !HTTP_FIELDS.has(field)), ...auth.ignored];
     if (typeof raw.url === 'string' && typeof raw.serverUrl === 'string') ignored.push('serverUrl');
+    const entry: Record<string, unknown> = { name, ...common, transport: 'http', url, headers };
+    let oauth: ImportOAuth | undefined;
+    if (auth.oauth) {
+      const { clientSecretValue, ...shown } = auth.oauth;
+      oauth = shown;
+      entry.auth = 'oauth';
+      const settings = {
+        ...(shown.clientId !== undefined ? { clientId: shown.clientId } : {}),
+        // A plain secret stays here only until the import plan moves it into a secret.
+        ...(shown.clientSecret?.kind === 'reference' ? { clientSecret: shown.clientSecret.reference } : {}),
+        ...(clientSecretValue !== undefined ? { clientSecret: clientSecretValue } : {}),
+        ...(shown.scopes.length > 0 ? { scopes: shown.scopes } : {}),
+      };
+      if (Object.keys(settings).length > 0) entry.oauth = settings;
+    }
     return {
       key,
       name,
-      entry: { name, ...common, transport: 'http', url, headers },
+      entry,
       ignored,
       sensitive: sensitiveOf(headers, 'header'),
+      ...(auth.notes.length > 0 ? { notes: auth.notes } : {}),
+      ...(oauth ? { oauth } : {}),
     };
   }
   throw new Error('has neither a "command" (stdio server) nor a "url" (remote server)');
@@ -207,4 +331,55 @@ export function parseImportBlock(source: unknown, existingNames: readonly string
     }
   }
   return { shape, candidates, errors };
+}
+
+/** A pasted plain client secret, to be stored under `secretName` before the entry is saved. */
+export interface ClientSecretMove {
+  server: string;
+  secretName: string;
+  /** Never printed, logged or sent back. */
+  value: string;
+}
+
+export const KEEP_CLIENT_SECRET_MESSAGE =
+  'has a plain client secret, and a client secret is always stored in Credential Manager (it cannot be kept as plain text). Import it without --keep-secrets.';
+
+/**
+ * Moves every plain OAuth client secret of a parsed block into a secret, in place: the entry
+ * gets `secret:<name>` and the preview names it. The name is `<server>-client-secret`, or with
+ * `-2`, `-3`… when that name is taken (an existing secret is never overwritten or read). With
+ * `keepSecrets`, such an entry is an error and is left out; the others go on. The same for the
+ * CLI and `POST /api/import`.
+ */
+export function planClientSecrets(
+  parsed: ImportParseResult,
+  existingSecretNames: readonly string[],
+  options: { keepSecrets?: boolean } = {},
+): { moves: ClientSecretMove[] } {
+  const taken = new Set(existingSecretNames);
+  const moves: ClientSecretMove[] = [];
+  const kept: ImportCandidate[] = [];
+  for (const candidate of parsed.candidates) {
+    const settings = candidate.entry.oauth as Record<string, unknown> | undefined;
+    if (candidate.oauth?.clientSecret?.kind !== 'plain' || typeof settings?.clientSecret !== 'string') {
+      kept.push(candidate);
+      continue;
+    }
+    if (options.keepSecrets) {
+      parsed.errors.push({ key: candidate.key, message: KEEP_CLIENT_SECRET_MESSAGE });
+      continue;
+    }
+    const base = proposedSecretName(candidate.name, 'client-secret');
+    let secretName = base;
+    for (let n = 2; taken.has(secretName); n++) {
+      secretName = `${base.slice(0, SLUG_MAX_LENGTH - String(n).length - 1).replace(/-+$/, '')}-${n}`;
+    }
+    taken.add(secretName);
+    moves.push({ server: candidate.name, secretName, value: settings.clientSecret });
+    settings.clientSecret = `secret:${secretName}`;
+    candidate.oauth.clientSecret = { kind: 'plain', movedTo: secretName };
+    kept.push(candidate);
+  }
+  parsed.candidates = kept;
+  return { moves };
 }

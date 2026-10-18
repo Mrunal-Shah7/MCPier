@@ -106,6 +106,9 @@ export async function ensureGatewayRunning(
     args: [cliEntry, 'run-gateway'],
     // Not the caller's folder: a running process keeps its working folder from being deleted.
     cwd: paths.dir,
+    // The resolved folder, so a relative MCPIER_HOME is not resolved again from that new working
+    // folder (BUGS B-2: it made the gateway use <home>\<home>).
+    env: process.env.MCPIER_HOME?.trim() ? { ...process.env, MCPIER_HOME: paths.dir } : process.env,
   });
 
   const deadline = Date.now() + timeoutMs;

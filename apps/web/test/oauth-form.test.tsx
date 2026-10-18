@@ -24,12 +24,17 @@ async function choose(user: ReturnType<typeof userEvent.setup>, label: string, o
   await user.selectOptions(screen.getByLabelText(label), option);
 }
 
+/** Sprint 7: Transport and Sign-in are segmented controls (a group of pressed buttons). */
+async function pick(user: ReturnType<typeof userEvent.setup>, label: string, option: string) {
+  await user.click(within(screen.getByRole('group', { name: label })).getByRole('button', { name: option }));
+}
+
 /** Fills in an OAuth HTTP server, up to the OAuth client group. */
 async function fillOAuthServer(user: ReturnType<typeof userEvent.setup>) {
   await user.type(await screen.findByLabelText('Name'), 'notion');
-  await choose(user, 'Transport', 'HTTP (a remote URL)');
+  await pick(user, 'Transport', 'http');
   await user.type(screen.getByLabelText('URL'), 'https://mcp.example.com/mcp');
-  await choose(user, 'Sign-in', 'OAuth');
+  await pick(user, 'Sign-in', 'OAuth');
   await user.click(screen.getByText('Advanced'));
 }
 
@@ -55,14 +60,15 @@ describe('Add server: OAuth client', () => {
     const user = userEvent.setup();
     renderApp('/servers/new');
     await user.type(await screen.findByLabelText('Name'), 'notion');
-    await choose(user, 'Transport', 'HTTP (a remote URL)');
+    await pick(user, 'Transport', 'http');
     expect(screen.queryByRole('group', { name: 'OAuth client' })).toBeNull();
     await user.type(screen.getByLabelText('URL'), 'https://mcp.example.com/mcp');
-    await choose(user, 'Sign-in', 'OAuth');
+    await pick(user, 'Sign-in', 'OAuth');
     await user.click(screen.getByText('Advanced'));
     const group = screen.getByRole('group', { name: 'OAuth client' });
     await user.type(within(group).getByLabelText('Client ID'), 'from-console');
-    await user.type(within(group).getByLabelText('Extra scopes'), 'read  write');
+    // Sprint 7: scopes are chips; a space adds what was typed.
+    await user.type(within(group).getByLabelText('Scopes'), 'read  write');
     await choose(user, 'Client secret', 'Store as a secret');
     expect(within(group).getByLabelText('Secret name')).toHaveValue('notion-client-secret');
     await user.type(within(group).getByLabelText('Client secret value'), CLIENT_SECRET);
@@ -145,10 +151,12 @@ describe('Add server: OAuth client', () => {
     await user.click(screen.getByRole('button', { name: 'Test connection' }));
     const result = await screen.findByRole('status', { name: '' });
     expect(result).toHaveTextContent('OAuth discovery worked: save the server, then sign in from its page');
-    expect(result).toHaveTextContent('Protected-resource metadata: found');
-    expect(result).toHaveTextContent('Authorization server: https://auth.example.com (metadata found)');
-    expect(result).toHaveTextContent('Sign-in would use dynamic registration.');
-    expect(result).toHaveTextContent('Scopes offered: read write');
+    // Sprint 7: what was found is a key/value list, scopes as chips.
+    expect(result).toHaveTextContent(/Resource metadata\s*found/);
+    expect(result).toHaveTextContent(/Authorization server\s*https:\/\/auth\.example\.com \(found\)/);
+    expect(result).toHaveTextContent(/Sign-in\s*Would use dynamic registration/);
+    expect(within(result).getByText('read')).toBeInTheDocument();
+    expect(within(result).getByText('write')).toBeInTheDocument();
     expect(tested).toMatchObject({ auth: 'oauth', url: 'https://mcp.example.com/mcp' });
   });
 
@@ -216,7 +224,7 @@ describe('Edit server: OAuth client', () => {
     await user.click(await screen.findByText('Advanced'));
     const group = screen.getByRole('group', { name: 'OAuth client' });
     expect(within(group).getByLabelText('Client ID')).toHaveValue('from-console');
-    expect(within(group).getByLabelText('Extra scopes')).toHaveValue('read');
+    expect(within(group).getByRole('button', { name: 'Remove scope read' })).toBeInTheDocument();
     expect(within(group).getByLabelText('Client secret')).toHaveDisplayValue('Use an existing secret');
     await waitFor(() => expect(within(group).getByLabelText('Secret')).toHaveDisplayValue('existing-key'));
 

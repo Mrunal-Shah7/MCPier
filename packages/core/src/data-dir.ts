@@ -25,6 +25,8 @@ export interface DataPaths {
   oauthDir: string;
   /** The call and search log and the tool cache (SQLite). */
   db: string;
+  /** Cached server icons and their metadata (created on first use; inherits the restriction). */
+  iconsDir: string;
 }
 
 export function dataPaths(dir: string): DataPaths {
@@ -39,6 +41,7 @@ export function dataPaths(dir: string): DataPaths {
     gatewayLog: join(logsDir, 'gateway.log'),
     oauthDir: join(dir, 'oauth'),
     db: join(dir, 'mcpier.db'),
+    iconsDir: join(dir, 'icons'),
   };
 }
 

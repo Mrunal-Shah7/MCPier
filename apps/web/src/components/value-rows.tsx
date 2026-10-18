@@ -137,7 +137,7 @@ export function ValueRows({
                 </label>
               ) : null}
               {secretNameProblem ? (
-                <p className="text-destructive text-xs">Secret name {secretNameProblem}.</p>
+                <p className="text-tone-bad-text text-xs">Secret name {secretNameProblem}.</p>
               ) : null}
             </div>
           </div>

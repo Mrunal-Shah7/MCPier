@@ -153,14 +153,22 @@ describe('Server detail: tools and logs', () => {
     });
     const user = userEvent.setup();
     renderApp('/servers/files?tab=tools&tool=read_file');
-    const row = (await screen.findByText('read_file')).closest('[data-tool]') as HTMLElement;
+    // Sprint 7: a tool list with the hints, and the selected tool's detail beside it.
+    const list = await screen.findByRole('region', { name: 'Tool list' });
+    const row = within(list).getByText('read_file').closest('[data-tool]') as HTMLElement;
     expect(within(row).getByText('read-only')).toBeInTheDocument();
-    // Opened from a deep link: the schemas are visible.
-    expect(within(row).getByText('Input schema')).toBeInTheDocument();
-    expect(within(row).getByText('Output schema')).toBeInTheDocument();
-    const weird = screen.getByText('weird name').closest('[data-tool]') as HTMLElement;
+    // Opened from a deep link: that tool is selected and its schemas are visible.
+    const toolDetail = screen.getByRole('region', { name: 'Tool detail' });
+    expect(toolDetail).toHaveTextContent('read_file');
+    expect(within(toolDetail).getByText('Input schema')).toBeInTheDocument();
+    expect(within(toolDetail).getByText('Output schema')).toBeInTheDocument();
+    const weird = within(list).getByText('weird name').closest('[data-tool]') as HTMLElement;
     expect(within(weird).getByText('destructive')).toBeInTheDocument();
     expect(within(weird).getByText('flagged name')).toBeInTheDocument();
+    await user.click(within(weird).getByRole('button', { name: /weird name/ }));
+    expect(
+      await within(toolDetail).findByText('The tool name uses characters outside A-Z.'),
+    ).toBeInTheDocument();
     await user.click(within(weird).getByRole('switch', { name: 'Enable files__weird name' }));
     await waitFor(() => expect(toggled).toBe('/api/tools/files__weird%20name/enable'));
   });

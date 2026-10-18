@@ -77,9 +77,43 @@ export const SettingsSchema = z.looseObject({
   cimdUrl: z.url({ protocol: /^https$/, error: 'must be an https:// URL' }).optional(),
 });
 
+/** File types a local icon may have (the bytes are still checked when it is read). */
+export const ICON_FILE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.ico', '.svg'] as const;
+
+/** Why an `icon` value is not usable, or undefined when it is. */
+export function iconFieldProblem(value: string): string | undefined {
+  if (value === 'none') return undefined;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      return 'must be an https:// URL, an absolute path to an image file, or "none"';
+    }
+    return url.protocol === 'https:' ? undefined : 'must use https:// (or be an absolute path, or "none")';
+  }
+  const absolute = /^[A-Za-z]:[\\/]/.test(value) || /^\\\\[^\\]+\\[^\\]+/.test(value);
+  if (!absolute) return 'must be an https:// URL, an absolute path to an image file, or "none"';
+  const lower = value.toLowerCase();
+  if (!ICON_FILE_EXTENSIONS.some((extension) => lower.endsWith(extension))) {
+    return `must be a ${ICON_FILE_EXTENSIONS.join(', ')} file`;
+  }
+  return undefined;
+}
+
+const iconField = z.string().superRefine((value, ctx) => {
+  const problem = iconFieldProblem(value);
+  if (problem) ctx.addIssue({ code: 'custom', message: problem });
+});
+
 const serverCommon = {
   name: slug,
   description: z.string().optional(),
+  /**
+   * The server's logo, overriding what MCPier finds: an `https` URL, an absolute path to a
+   * .png, .jpg, .webp, .ico or .svg file, or `"none"` for the letter tile.
+   */
+  icon: iconField.optional(),
   enabled: z.boolean({ error: 'must be true or false' }).default(true),
   timeoutMs: z
     .int({ error: 'must be a whole number of milliseconds' })
@@ -123,10 +157,22 @@ const secretRefOnly = z.string().superRefine((value, ctx) => {
   }
 });
 
+export const SCOPE_MAX_LENGTH = 128;
+export const SCOPE_MAX_COUNT = 50;
+
+/** Why a scope is not a valid RFC 6749 scope token, or undefined when it is. */
+export function scopeProblem(scope: string): string | undefined {
+  if (!/^[\x21\x23-\x5B\x5D-\x7E]+$/.test(scope))
+    return 'must be one scope: no spaces, quotes or backslashes';
+  if (scope.length > SCOPE_MAX_LENGTH) return `must be at most ${SCOPE_MAX_LENGTH} characters`;
+  return undefined;
+}
+
 /** One OAuth scope token (RFC 6749 §3.3): printable ASCII without spaces, quotes or backslashes. */
 const scopeToken = z
   .string()
-  .regex(/^[\x21\x23-\x5B\x5D-\x7E]+$/, { error: 'must be one scope: no spaces, quotes or backslashes' });
+  .regex(/^[\x21\x23-\x5B\x5D-\x7E]+$/, { error: 'must be one scope: no spaces, quotes or backslashes' })
+  .max(SCOPE_MAX_LENGTH, { error: `must be at most ${SCOPE_MAX_LENGTH} characters` });
 
 /**
  * Optional OAuth client settings for an `auth: "oauth"` server. A `clientId` makes MCPier use
@@ -137,8 +183,14 @@ export const OAuthClientSchema = z
     clientId: z.string().min(1, { error: 'must not be empty' }).optional(),
     /** Only as a reference: `secret:<name>`. */
     clientSecret: secretRefOnly.optional(),
-    /** Scopes requested on top of the ones the server asks for. */
-    scopes: z.array(scopeToken).optional(),
+    /**
+     * When non-empty, exactly these scopes are requested (plus `offline_access` when the
+     * authorization server offers it); otherwise the server's own scopes are used.
+     */
+    scopes: z
+      .array(scopeToken)
+      .max(SCOPE_MAX_COUNT, { error: `must list at most ${SCOPE_MAX_COUNT} scopes` })
+      .optional(),
   })
   .superRefine((value, ctx) => {
     if (value.clientSecret !== undefined && value.clientId === undefined) {
@@ -159,6 +211,21 @@ export const HttpServerSchema = z.looseObject({
   /** OAuth client settings; used only when `auth` is `"oauth"`. */
   oauth: OAuthClientSchema.optional(),
 });
+
+/**
+ * Keys of a server entry that MCPier does not use (`oauth.<key>` for the OAuth block), for the
+ * JSON editor's "not used by MCPier" warning. They are kept as written.
+ */
+export function unknownEntryKeys(entry: Record<string, unknown>): string[] {
+  const shape = entry.transport === 'http' ? HttpServerSchema.shape : StdioServerSchema.shape;
+  const unknown = Object.keys(entry).filter((key) => !(key in shape));
+  const oauth = entry.oauth;
+  if (entry.transport === 'http' && typeof oauth === 'object' && oauth !== null && !Array.isArray(oauth)) {
+    const known = ['clientId', 'clientSecret', 'scopes'];
+    for (const key of Object.keys(oauth)) if (!known.includes(key)) unknown.push(`oauth.${key}`);
+  }
+  return unknown;
+}
 
 export const ServerEntrySchema = z.discriminatedUnion('transport', [StdioServerSchema, HttpServerSchema], {
   error: 'must be "stdio" or "http"',

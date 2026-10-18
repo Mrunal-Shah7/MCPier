@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { AlertCircleIcon, CheckIcon, CopyIcon } from 'lucide-react';
+import { AlertCircleIcon, CheckIcon, CopyIcon, Trash2Icon } from 'lucide-react';
 import { describeError } from '@/lib/api';
 import {
   AlertDialog,
@@ -47,8 +47,8 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-10 text-center">
-      <p className="font-medium">{title}</p>
+    <div className="bg-card shadow-card flex flex-col items-center gap-2 rounded-[10px] border px-6 py-10 text-center">
+      <p className="m-0 font-semibold">{title}</p>
       {children ? <div className="text-muted-foreground max-w-md text-sm">{children}</div> : null}
       {action ? <div className="mt-2">{action}</div> : null}
     </div>
@@ -107,12 +107,22 @@ export function ConfirmDialog({
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            <div>{description}</div>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
+        <div className="flex items-start gap-3">
+          {destructive ? (
+            <span
+              aria-hidden="true"
+              className="bg-tone-bad-soft text-tone-bad-text grid size-[30px] shrink-0 place-items-center rounded-lg"
+            >
+              <Trash2Icon className="size-4" />
+            </span>
+          ) : null}
+          <AlertDialogHeader className="min-w-0 text-left">
+            <AlertDialogTitle>{title}</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="wrap-anywhere">{description}</div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+        </div>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
@@ -175,4 +185,14 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
       {copied ? 'Copied' : 'Copy'}
     </Button>
   );
+}
+
+/** A table cell's time: the time alone for today, else a short date and time (Sprint 7). */
+export function formatShortTime(iso: string | undefined, now = new Date()): string {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toDateString() === now.toDateString()
+    ? date.toLocaleTimeString()
+    : date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }

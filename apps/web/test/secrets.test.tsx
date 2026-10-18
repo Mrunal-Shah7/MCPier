@@ -26,7 +26,8 @@ describe('Secrets page', () => {
     fakeApi(routes());
     renderApp('/secrets');
     const row = (await screen.findByText('github-token')).closest('tr')!;
-    expect(row).toHaveTextContent('…wxyz');
+    // Sprint 7: masked as dots before the last four characters.
+    expect(row).toHaveTextContent('••••wxyz');
     expect(row).toHaveTextContent('github');
     expect(screen.getByText('unused-key').closest('tr')).toHaveTextContent('nothing');
     const missing = screen.getByText('Referenced but not set').closest('[role="alert"]') as HTMLElement;

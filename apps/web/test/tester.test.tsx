@@ -280,7 +280,8 @@ describe('Tester: running', () => {
     const user = userEvent.setup();
     renderApp('/tester?tool=files__write');
     expect(await screen.findByRole('radio', { name: 'As the model sees it' })).toBeChecked();
-    await user.click(screen.getByRole('button', { name: 'Run' }));
+    // Sprint 7: the mode switch sits in the page title, shown before the tool has loaded.
+    await user.click(await screen.findByRole('button', { name: 'Run' }));
     const result = await screen.findByRole('region', { name: 'Result' });
     expect(within(result).getByRole('note')).toHaveTextContent('1024 bytes of text shown, 1976 dropped');
     expect(within(result).getByText('[MCPier: output truncated.]')).toBeInTheDocument();

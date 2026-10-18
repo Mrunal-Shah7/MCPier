@@ -1,17 +1,22 @@
 // Fake stateless MCP server: protocol 2026-07-28 only, no sessions, no handshake.
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { listenFixture, notFound, type RunningFixture } from './http-common.js';
-import { createFakeServer } from './tools.js';
+import { createFakeServer, type FixtureServerInfo } from './tools.js';
 
 /**
  * Starts the stateless fixture. `legacy: 'reject'` makes it strictly 2026-07-28: a client
  * using the old `initialize` handshake gets an unsupported-protocol-version error.
  */
 export async function startStatelessServer(
-  options: { port?: number; toolsTtlMs?: number } = {},
+  options: { port?: number; toolsTtlMs?: number; serverInfo?: FixtureServerInfo } = {},
 ): Promise<RunningFixture> {
   const handler = createMcpHandler(
-    () => createFakeServer('fake-stateless-http', { toolsTtlMs: options.toolsTtlMs, modernTools: true }),
+    () =>
+      createFakeServer('fake-stateless-http', {
+        toolsTtlMs: options.toolsTtlMs,
+        modernTools: true,
+        ...(options.serverInfo ? { serverInfo: options.serverInfo } : {}),
+      }),
     { legacy: 'reject' },
   );
   const fixture = await listenFixture(

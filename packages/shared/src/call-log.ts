@@ -56,6 +56,23 @@ export interface CallSummary {
   traceId?: string;
   /** Whether arguments and result were stored for this call. */
   bodiesStored: boolean;
+  /**
+   * The size of the result as the caller received it (UTF-8 JSON without `_meta`; for
+   * `call_tool`, after truncation). Absent for calls recorded before 1.1.0.
+   */
+  resultBytes?: number;
+  /** `estimateTokens(resultBytes)`, computed when the record is read. */
+  estimatedTokens?: number;
+}
+
+/** The short error text of a failed call, raw and clean (`cleanErrorMessage`). */
+export interface CallErrorFields {
+  /** A short error text for failed outcomes (redacted, at most 500 characters). */
+  errorText?: string;
+  /** The readable sentence inside the full error text. */
+  errorMessage?: string;
+  /** A JSON-RPC or HTTP code found in it. */
+  errorCode?: number;
 }
 
 /** A stored body: JSON text, possibly cut (then no longer valid JSON). */
@@ -65,17 +82,13 @@ export interface StoredBody {
 }
 
 /** `GET /api/calls/:id` */
-export interface CallDetail extends CallSummary {
-  /** A short error text for failed outcomes (redacted). */
-  errorText?: string;
+export interface CallDetail extends CallSummary, CallErrorFields {
   arguments?: StoredBody;
   result?: StoredBody;
 }
 
-/** One entry of the call list: the summary plus the short error text. */
-export interface CallListItem extends CallSummary {
-  errorText?: string;
-}
+/** One entry of the call list: the summary plus the short error text, raw and clean. */
+export interface CallListItem extends CallSummary, CallErrorFields {}
 
 /** `GET /api/calls` */
 export interface CallListResponse {
@@ -103,6 +116,9 @@ export interface SearchSummary {
   calledTool?: string;
   /** 1-based rank of the called tool in the results (hits only). */
   rank?: number;
+  /** The size of what `search_tools` returned (absent before 1.1.0). */
+  resultBytes?: number;
+  estimatedTokens?: number;
 }
 
 /** `GET /api/searches` */
@@ -117,6 +133,8 @@ export interface ServerCallStats {
   errors: number;
   p50Ms: number;
   p95Ms: number;
+  /** Estimated tokens returned by this server's calls (those with a size). */
+  tokens: number;
 }
 
 /** `GET /api/calls/stats?from=&to=` */
@@ -132,6 +150,10 @@ export interface CallStatsResponse {
     p95Ms: number | null;
     byOutcome: Partial<Record<CallOutcomeName, number>>;
     byServer: ServerCallStats[];
+    /** Estimated tokens returned by calls with a size. */
+    tokens: number;
+    /** Calls recorded without a size (before 1.1.0). */
+    callsWithoutSize: number;
   };
   searches: {
     total: number;

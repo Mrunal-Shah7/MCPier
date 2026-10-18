@@ -2,12 +2,20 @@
 // gateway on a random port, the fake secret store and a temporary home. The browser is
 // replaced by HTTP: the authorization URL is followed through the fixture's auto-approve to
 // the gateway's own callback.
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { AUTH_API_PATHS, cimdDocument, needsAuthDetail, type AuthStatusResponse } from '@mcpier/shared';
+import {
+  API_PATHS,
+  AUTH_API_PATHS,
+  CALL_LOG_PATHS,
+  cimdDocument,
+  needsAuthDetail,
+  USAGE_PATH,
+  type AuthStatusResponse,
+} from '@mcpier/shared';
 import { createGatewayLogger, OAUTH_KEY_ACCOUNT, OAuthStore } from '@mcpier/core';
-import { listenFixture, type RunningFixture } from '@mcpier/test-fixtures';
+import { listenFixture, startIconHost, type RunningFixture } from '@mcpier/test-fixtures';
 import { getFreePort } from '../../../test/helpers/ports.js';
 import { openSse } from '../../../test/helpers/sse.js';
 import { waitForStatus, waitUntil } from '../../../test/helpers/gateway.js';
@@ -43,7 +51,7 @@ describe('OAuth sign-in', () => {
     // No tokens: needs_auth, and nothing was sent to the server.
     await waitForStatus(w.t.gateway, OAUTH_SERVER, 'needs_auth');
     expect(status(w).detail).toBe('Sign in required');
-    expect(w.fixture.log.mcp).toEqual({ ok: 0, unauthorized: 0, forbidden: 0 });
+    expect(w.fixture.log.mcp).toEqual({ ok: 0, unauthorized: 0, forbidden: 0, unauthorizedMethods: [] });
 
     const started = await w.startSignIn();
     expect(started.registrationMethod).toBe('dynamic');
@@ -289,10 +297,15 @@ describe('refresh', () => {
     await w.signIn();
     const before = await storedRecord(w);
     w.fixture.expireAccessTokens();
-    const unauthorized = w.fixture.log.mcp.unauthorized;
+    const seen = w.fixture.log.mcp.unauthorizedMethods.length;
     expect(resultText(await w.callTool('notion__echo', { text: 'after 401' }))).toBe('after 401');
     expect(w.fixture.log.refreshes).toBe(1);
-    expect(w.fixture.log.mcp.unauthorized).toBe(unauthorized + 1);
+    // Exactly one 401 for the call itself; a health check (tools/list) may land in between and
+    // take its own 401 under load, which single flight absorbs (Sprint 7 BUGS B-1).
+    const calls401 = w.fixture.log.mcp.unauthorizedMethods
+      .slice(seen)
+      .filter((method) => method === 'tools/call');
+    expect(calls401).toHaveLength(1);
     const after = await storedRecord(w);
     expect(after?.tokens?.refreshToken).toBeTruthy();
     expect(after?.tokens?.refreshToken).not.toBe(before?.tokens?.refreshToken);
@@ -503,8 +516,16 @@ describe('call_tool messages', () => {
 
 describe('no values anywhere', () => {
   it('after a whole sequence, no token, code, verifier, state, client secret or key leaks', async () => {
+    // Sprint 7: the server also announces a logo, so an icon is fetched and cached.
+    const iconHost = await startIconHost();
     world = await startOAuthWorld({
-      fixture: { issueClientSecret: true, accessTokenLength: 1500, requiredScope: 'mcp:admin' },
+      fixture: {
+        issueClientSecret: true,
+        accessTokenLength: 1500,
+        requiredScope: 'mcp:admin',
+        serverInfo: { icons: [{ src: `${iconHost.origin}/headers.png` }] },
+      },
+      extra: { icons: { allowLoopbackHttp: true } },
     });
     const w = world;
     const events = await openSse(`${w.t.gateway.url}/api/events`, { authorization: `Bearer ${w.t.token}` });
@@ -539,13 +560,54 @@ describe('no values anywhere', () => {
     w.fixture.options.rejectAuthorization = { error: 'access_denied', description: `leak ${planted}` };
     const refused = await w.finish(started.authorizationUrl);
     expect(refused.html).toContain('access_denied (leak [redacted])');
+
+    // Sprint 7: an import carrying a plain client secret (a dry run, then for real), Tester runs
+    // in both modes while signed in, the call and usage routes, and the icon fetch and route.
+    const IMPORTED = 'imported-client-secret-value-5150';
+    const source = {
+      mcpServers: {
+        box: {
+          url: w.fixture.mcpUrl,
+          oauth: { clientId: 'box-app', clientSecret: IMPORTED },
+          disabled: true,
+        },
+      },
+    };
+    expect((await w.api('POST', API_PATHS.import, { source, dryRun: true })).status).toBe(200);
+    expect((await w.api('POST', API_PATHS.import, { source })).status).toBe(201);
+    expect(await w.secrets.get('box-client-secret')).toBe(IMPORTED);
+    w.fixture.options.rejectAuthorization = undefined;
+    await w.signIn();
+    for (const mode of ['model', 'raw'] as const) {
+      const run = await w.api('POST', CALL_LOG_PATHS.test('notion__echo'), {
+        mode,
+        arguments: { text: mode },
+      });
+      expect(run.status).toBe(200);
+    }
+    await w.api('GET', `${CALL_LOG_PATHS.calls}?limit=200`);
+    await w.api('GET', `${USAGE_PATH}?range=24h`);
+    await waitUntil(() => w.t.gateway.manager.summary(OAUTH_SERVER).icon?.available === true, 15_000);
+    const icon = await fetch(`${w.t.gateway.url}${API_PATHS.serverIcon(OAUTH_SERVER)}`, {
+      headers: { authorization: `Bearer ${w.t.token}` },
+    });
+    expect(icon.status).toBe(200);
+    expect(iconHost.receivedHeaders().length).toBeGreaterThan(0);
+    for (const headers of iconHost.receivedHeaders()) expect(headers).not.toHaveProperty('authorization');
     await new Promise((resolve) => setTimeout(resolve, 300));
     events.close();
+    // Stopped, so every queued call-log write is on disk.
+    await w.t.gateway.stop('leak check');
+    await iconHost.close();
 
     const key = (await w.secrets.internal().get(OAUTH_KEY_ACCOUNT))!;
-    const values = [...w.fixture.issuedValues(), ...w.fixture.receivedValues(), ...states, key].filter(
-      (value) => value.length >= 8,
-    );
+    const values = [
+      ...w.fixture.issuedValues(),
+      ...w.fixture.receivedValues(),
+      ...states,
+      key,
+      IMPORTED,
+    ].filter((value) => value.length >= 8);
     expect(values.length).toBeGreaterThan(10);
     const logsDir = w.t.home.paths.logsDir;
     const corpus = [
@@ -553,10 +615,20 @@ describe('no values anywhere', () => {
       events.raw(),
       readFileSync(w.t.home.paths.config, 'utf8'),
       ...readdirSync(logsDir).map((file) => readFileSync(join(logsDir, file), 'utf8')),
+      // The call log read raw (with its write-ahead log), and the icon cache's metadata.
+      ...[w.t.home.paths.db, `${w.t.home.paths.db}-wal`]
+        .filter((file) => existsSync(file))
+        .map((file) => readFileSync(file, 'latin1')),
+      ...readdirSync(join(w.t.home.dir, 'icons'))
+        .filter((file) => file.endsWith('.json'))
+        .map((file) => readFileSync(join(w.t.home.dir, 'icons', file), 'utf8')),
     ].join('\n');
     for (const value of values)
       expect(corpus.includes(value), `leaked a value of ${value.length} characters`).toBe(false);
     expect(corpus).not.toMatch(/eyJ[A-Za-z0-9_-]{20}/);
+    // The raw database holds the Tester runs and the icon metadata exists: the check saw them.
+    expect(corpus).toContain('dashboard-tester');
+    expect(readdirSync(join(w.t.home.dir, 'icons'))).toContain(`${OAUTH_SERVER}.json`);
     expect(events.events.some((event) => event.event === 'auth_status')).toBe(true);
   });
 });

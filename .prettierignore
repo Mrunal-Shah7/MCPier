@@ -5,3 +5,4 @@ coverage
 pnpm-lock.yaml
 SPEC.md
 SPRINT-*.md
+docs/design

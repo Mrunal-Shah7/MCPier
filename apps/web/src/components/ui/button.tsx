@@ -8,13 +8,18 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground hover:bg-primary/90',
+        default:
+          'bg-primary text-primary-foreground hover:bg-brand-strong active:bg-brand-strong font-semibold',
+        // Solid rose with white text, darker rose on hover, a rose focus ring: in both themes.
+        // It never turns white or light on hover (Confirmed decision 7).
         destructive:
-          'bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40',
-        outline:
-          'border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50',
-        secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
-        ghost: 'hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50',
+          'bg-tone-bad text-white hover:bg-tone-bad-strong active:bg-tone-bad-strong focus-visible:border-tone-bad focus-visible:ring-tone-bad/40 font-semibold',
+        // Row and menu items that delete: rose text, a soft rose background on hover.
+        'destructive-ghost':
+          'text-tone-bad-text hover:bg-tone-bad-soft hover:text-tone-bad-text focus-visible:ring-tone-bad/40',
+        outline: 'border border-line-2 bg-card hover:bg-panel-3 hover:text-foreground',
+        secondary: 'bg-secondary text-secondary-foreground hover:bg-panel-3/80',
+        ghost: 'text-muted-foreground hover:bg-panel-2 hover:text-foreground',
         link: 'text-primary underline-offset-4 hover:underline',
       },
       size: {

@@ -6,6 +6,7 @@ import { SERVER_STATUSES } from '@mcpier/shared';
 import { ApiError, errorFromResponse, request } from '@/lib/api';
 import { ErrorMessage } from '@/components/common';
 import { STATUS_STYLES, StatusBadge } from '@/components/status-badge';
+import { TONE_BADGE } from '@/lib/palette';
 import { fakeApi, FakeEvents, renderApp, server, status } from './helpers';
 
 describe('auth gate', () => {
@@ -131,19 +132,27 @@ describe('error shape', () => {
   });
 });
 
+// Sprint 7 rewrote this block: badges now take one colour per meaning (Confirmed decision 2),
+// so Error and Crashed share the rose tone and differ by label only.
 describe('status badge', () => {
-  it.each(SERVER_STATUSES.map((state) => [state]))('%s has its own label and colour', (state) => {
+  it.each(SERVER_STATUSES.map((state) => [state]))('%s has its own label and its tone', (state) => {
     render(<StatusBadge state={state} />);
     const badge = screen.getByText(STATUS_STYLES[state].label).closest('[data-status]')!;
     expect(badge).toHaveAttribute('data-status', state);
-    expect(badge.className).toContain(STATUS_STYLES[state].className.split(' ')[0]);
+    expect(badge).toHaveAttribute('data-tone', STATUS_STYLES[state].tone);
+    expect(badge.className).toContain(TONE_BADGE[STATUS_STYLES[state].tone].split(' ')[0]);
   });
 
-  it('labels and colours are all different', () => {
+  it('labels are all different; colours follow the meaning', () => {
     const styles = Object.values(STATUS_STYLES);
     expect(new Set(styles.map((style) => style.label)).size).toBe(SERVER_STATUSES.length);
-    expect(new Set(styles.map((style) => style.className.split(' ')[0])).size).toBe(SERVER_STATUSES.length);
     expect(STATUS_STYLES.needs_auth.label).toBe('Needs sign-in');
+    expect(STATUS_STYLES.ready.tone).toBe('ok');
+    expect(STATUS_STYLES.starting.tone).toBe('info');
+    expect(STATUS_STYLES.needs_auth.tone).toBe('warn');
+    expect(STATUS_STYLES.error.tone).toBe('bad');
+    expect(STATUS_STYLES.crashed.tone).toBe('bad');
+    expect(STATUS_STYLES.stopped.tone).toBe('off');
   });
 });
 

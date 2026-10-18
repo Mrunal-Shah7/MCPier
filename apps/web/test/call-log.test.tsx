@@ -38,7 +38,9 @@ function stats(overrides: Partial<CallStatsResponse> = {}): CallStatsResponse {
       p50Ms: 40,
       p95Ms: 900,
       byOutcome: { ok: 9, failed: 3 },
-      byServer: [{ server: 'files', calls: 12, errors: 3, p50Ms: 40, p95Ms: 900 }],
+      byServer: [{ server: 'files', calls: 12, errors: 3, p50Ms: 40, p95Ms: 900, tokens: 300 }],
+      tokens: 300,
+      callsWithoutSize: 0,
     },
     searches: { total: 4, hits: 2, misses: 1, none: 1, pending: 0, hitRate: 2 / 3 },
     recentMisses: [

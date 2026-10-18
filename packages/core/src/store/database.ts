@@ -68,7 +68,49 @@ const MIGRATIONS: ((db: Db) => void)[] = [
       );
     `);
   },
+  // 2 (Sprint 7): result sizes for the token estimate, the clean error message, usage indexes.
+  (db) => {
+    db.exec(`
+      ALTER TABLE calls ADD COLUMN result_bytes INTEGER;
+      ALTER TABLE calls ADD COLUMN error_message TEXT;
+      ALTER TABLE calls ADD COLUMN error_code INTEGER;
+      ALTER TABLE searches ADD COLUMN result_bytes INTEGER;
+      CREATE INDEX calls_tool_at ON calls (tool, at);
+      CREATE INDEX calls_client_name_at ON calls (client_name, at);
+    `);
+    backfillResultBytes(db);
+  },
 ];
+
+/**
+ * Older calls get a size only from a result body that was stored whole: the same measure the
+ * recorder uses (UTF-8 JSON without `_meta`). A cut body, or a call without bodies, stays empty.
+ */
+function backfillResultBytes(db: Db): void {
+  const rows = db
+    .prepare(
+      `SELECT id, result FROM calls
+       WHERE bodies_stored = 1 AND result IS NOT NULL AND result_truncated = 0 AND result_bytes IS NULL`,
+    )
+    .iterate() as IterableIterator<{ id: number; result: string }>;
+  const update = db.prepare('UPDATE calls SET result_bytes = ? WHERE id = ?');
+  const sizes: [number, number][] = [];
+  for (const row of rows) {
+    let value: unknown;
+    try {
+      value = JSON.parse(row.result);
+    } catch {
+      continue;
+    }
+    if (typeof value === 'object' && value !== null && !Array.isArray(value) && '_meta' in value) {
+      const { _meta: _ignored, ...rest } = value as Record<string, unknown>;
+      value = rest;
+    }
+    // A refused call stored `null`: the caller got no result (the recorder records 0).
+    sizes.push([value === null ? 0 : Buffer.byteLength(JSON.stringify(value), 'utf8'), row.id]);
+  }
+  for (const [bytes, id] of sizes) update.run(bytes, id);
+}
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
 
@@ -80,13 +122,17 @@ export function openDatabaseReadOnly(file: string): Db {
   return new Database(file, { readonly: true, fileMustExist: true });
 }
 
-/** Runs every migration the file has not had yet, each in its own transaction. */
-export function migrate(db: Db): number {
+/**
+ * Runs every migration the file has not had yet, each in its own transaction. `upTo` stops at
+ * an older version (tests build a database as an older release left it).
+ */
+export function migrate(db: Db, upTo: number = MIGRATIONS.length): number {
   db.exec('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)');
   const row = db.prepare('SELECT version FROM schema_version').get() as { version: number } | undefined;
   if (!row) db.prepare('INSERT INTO schema_version (version) VALUES (0)').run();
   let version = row?.version ?? 0;
-  while (version < MIGRATIONS.length) {
+  const target = Math.min(upTo, MIGRATIONS.length);
+  while (version < target) {
     const next = version + 1;
     db.transaction(() => {
       MIGRATIONS[version]!(db);

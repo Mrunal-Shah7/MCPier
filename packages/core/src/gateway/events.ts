@@ -69,6 +69,8 @@ export class GatewayEventHub extends EventEmitter<{ event: [GatewayEvent] }> {
           outcome: call.outcome,
           ...(call.traceId !== undefined ? { traceId: call.traceId } : {}),
           bodiesStored: call.bodiesStored,
+          ...(call.resultBytes !== undefined ? { resultBytes: call.resultBytes } : {}),
+          ...(call.estimatedTokens !== undefined ? { estimatedTokens: call.estimatedTokens } : {}),
         },
       });
     callLog?.on('recorded', onRecorded);
@@ -88,6 +90,11 @@ export class GatewayEventHub extends EventEmitter<{ event: [GatewayEvent] }> {
   /** Secrets were set or deleted: the current names, never values. */
   secretsChanged(names: string[]): void {
     this.publish({ type: 'secrets_changed', data: { names: [...names].sort() } });
+  }
+
+  /** A server's cached icon changed: the existing server-changed event, with the name only. */
+  iconChanged(name: string): void {
+    if (this.manager.has(name)) this.publish({ type: 'server_edited', data: { name } });
   }
 
   private publish(event: GatewayEvent): void {

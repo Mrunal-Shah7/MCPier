@@ -24,15 +24,15 @@ function assertBuilt(): void {
 export function runCli(
   args: string[],
   env: NodeJS.ProcessEnv,
-  options: { input?: string; timeoutMs?: number } | number = {},
+  options: { input?: string; timeoutMs?: number; cwd?: string } | number = {},
 ): Promise<CliResult> {
   assertBuilt();
-  const { input, timeoutMs = 60_000 } = typeof options === 'number' ? { timeoutMs: options } : options;
+  const { input, timeoutMs = 60_000, cwd } = typeof options === 'number' ? { timeoutMs: options } : options;
   return new Promise((resolve, reject) => {
     const child = execFile(
       process.execPath,
       [CLI_ENTRY, ...args],
-      { env, timeout: timeoutMs, windowsHide: true, encoding: 'utf8' },
+      { env, timeout: timeoutMs, windowsHide: true, encoding: 'utf8', ...(cwd ? { cwd } : {}) },
       (error, stdout, stderr) => {
         if (error && typeof error.code !== 'number') {
           reject(error);

@@ -2,64 +2,129 @@
 @import 'tw-animate-css';
 
 /*
- * Theme tokens (shadcn/ui "neutral"). Light by default; dark when the system prefers it.
- * Nothing is stored: the theme always follows the operating system setting.
+ * Theme tokens (Sprint 7 design): an emerald accent, panels and borders per theme, and one tone
+ * per meaning (ready/ok, starting/http, needs sign-in/timeout, error, stdio/needs input,
+ * invalid arguments, stopped). Light by default; dark when the system prefers it, unless the
+ * theme switch chose one (`html[data-theme]`, set by the app; nothing is stored).
+ *
+ * Everything here is static CSS: no inline styles, no custom properties set from markup.
  */
 :root {
-  --radius: 0.5rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
+  --radius: 0.625rem;
+  --accent-base: #10b981;
+  --accent-strong: #059669;
+  --accent-soft: rgba(16, 185, 129, 0.1);
+  --accent-line: rgba(16, 185, 129, 0.35);
+
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --panel-2: #f8f9fb;
+  --panel-3: #eef1f4;
+  --line: #e3e7ec;
+  --line-2: #d5dbe2;
+  --text: #14181f;
+  --text-muted: #5d6675;
+  --text-faint: #8a93a2;
+
+  /* Tones: the base colour (dots, bars, edges), a text colour readable on this theme, a tint. */
+  --tone-ok: #10b981;
+  --tone-ok-text: #047857;
+  --tone-ok-soft: rgba(16, 185, 129, 0.12);
+  --tone-info: #38bdf8;
+  --tone-info-text: #0369a1;
+  --tone-info-soft: rgba(56, 189, 248, 0.13);
+  --tone-warn: #f59e0b;
+  --tone-warn-text: #b45309;
+  --tone-warn-soft: rgba(245, 158, 11, 0.13);
+  --tone-bad: #f43f5e;
+  --tone-bad-text: #be123c;
+  --tone-bad-soft: rgba(244, 63, 94, 0.12);
+  --tone-input: #a78bfa;
+  --tone-input-text: #6d28d9;
+  --tone-input-soft: rgba(167, 139, 250, 0.14);
+  --tone-invalid: #fb923c;
+  --tone-invalid-text: #c2410c;
+  --tone-invalid-soft: rgba(251, 146, 60, 0.14);
+  --tone-off: #94a3b8;
+  --tone-off-text: #475569;
+  --tone-off-soft: rgba(148, 163, 184, 0.16);
+
+  --card-shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 6px 18px rgba(16, 24, 40, 0.05);
 }
 
+/* Dark: the system preference unless the switch chose light, or the switch chose dark. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --destructive-foreground: oklch(0.985 0 0);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
+  :root:not([data-theme='light']) {
+    --accent-soft: rgba(16, 185, 129, 0.12);
+    --bg: #0a0b0d;
+    --panel: #111317;
+    --panel-2: #161a1f;
+    --panel-3: #1c2128;
+    --line: #232831;
+    --line-2: #2d333d;
+    --text: #e7e9ec;
+    --text-muted: #8a93a2;
+    --text-faint: #6b7381;
+    --tone-ok-text: #10b981;
+    --tone-info-text: #38bdf8;
+    --tone-warn-text: #f59e0b;
+    --tone-bad-text: #fb7185;
+    --tone-input-text: #a78bfa;
+    --tone-invalid-text: #fb923c;
+    --tone-off-text: #94a3b8;
+    --card-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px rgba(0, 0, 0, 0.25);
   }
+}
+:root[data-theme='dark'] {
+  --accent-soft: rgba(16, 185, 129, 0.12);
+  --bg: #0a0b0d;
+  --panel: #111317;
+  --panel-2: #161a1f;
+  --panel-3: #1c2128;
+  --line: #232831;
+  --line-2: #2d333d;
+  --text: #e7e9ec;
+  --text-muted: #8a93a2;
+  --text-faint: #6b7381;
+  --tone-ok-text: #10b981;
+  --tone-info-text: #38bdf8;
+  --tone-warn-text: #f59e0b;
+  --tone-bad-text: #fb7185;
+  --tone-input-text: #a78bfa;
+  --tone-invalid-text: #fb923c;
+  --tone-off-text: #94a3b8;
+  --card-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+/* `dark:` follows the resolved theme the app writes on <html> (system or the switch). */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+/* The shadcn/ui names, mapped onto the design tokens. */
+:root {
+  --background: var(--bg);
+  --foreground: var(--text);
+  --card: var(--panel);
+  --card-foreground: var(--text);
+  --popover: var(--panel);
+  --popover-foreground: var(--text);
+  --primary: var(--accent-base);
+  --primary-foreground: #04140e;
+  --secondary: var(--panel-3);
+  --secondary-foreground: var(--text);
+  --muted: var(--panel-2);
+  --muted-foreground: var(--text-muted);
+  --accent: var(--panel-3);
+  --accent-foreground: var(--text);
+  --destructive: var(--tone-bad);
+  --destructive-foreground: #ffffff;
+  --border: var(--line);
+  --input: var(--line-2);
+  --ring: var(--accent-base);
+  --sidebar: var(--panel);
+  --sidebar-foreground: var(--text);
+  --sidebar-accent: var(--accent-soft);
+  --sidebar-accent-foreground: var(--text);
+  --sidebar-border: var(--line);
 }
 
 @theme inline {
@@ -67,6 +132,8 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: 'Inter', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -91,6 +158,54 @@
   --color-sidebar-accent: var(--sidebar-accent);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
+
+  --color-brand: var(--accent-base);
+  --color-brand-strong: var(--accent-strong);
+  --color-brand-soft: var(--accent-soft);
+  --color-brand-line: var(--accent-line);
+  --color-panel-2: var(--panel-2);
+  --color-panel-3: var(--panel-3);
+  --color-line-2: var(--line-2);
+  --color-faint: var(--text-faint);
+
+  --color-tone-ok: var(--tone-ok);
+  --color-tone-ok-text: var(--tone-ok-text);
+  --color-tone-ok-soft: var(--tone-ok-soft);
+  --color-tone-info: var(--tone-info);
+  --color-tone-info-text: var(--tone-info-text);
+  --color-tone-info-soft: var(--tone-info-soft);
+  --color-tone-warn: var(--tone-warn);
+  --color-tone-warn-text: var(--tone-warn-text);
+  --color-tone-warn-soft: var(--tone-warn-soft);
+  --color-tone-bad: var(--tone-bad);
+  --color-tone-bad-strong: #e11d48;
+  --color-tone-bad-text: var(--tone-bad-text);
+  --color-tone-bad-soft: var(--tone-bad-soft);
+  --color-tone-input: var(--tone-input);
+  --color-tone-input-text: var(--tone-input-text);
+  --color-tone-input-soft: var(--tone-input-soft);
+  --color-tone-invalid: var(--tone-invalid);
+  --color-tone-invalid-text: var(--tone-invalid-text);
+  --color-tone-invalid-soft: var(--tone-invalid-soft);
+  --color-tone-off: var(--tone-off);
+  --color-tone-off-text: var(--tone-off-text);
+  --color-tone-off-soft: var(--tone-off-soft);
+
+  /* The 12 server colours (tiles, chart series, legends), chosen by a hash of the name. */
+  --color-pal-0: #10b981;
+  --color-pal-1: #38bdf8;
+  --color-pal-2: #a78bfa;
+  --color-pal-3: #f59e0b;
+  --color-pal-4: #f43f5e;
+  --color-pal-5: #22d3ee;
+  --color-pal-6: #fb923c;
+  --color-pal-7: #818cf8;
+  --color-pal-8: #84cc16;
+  --color-pal-9: #e879f9;
+  --color-pal-10: #14b8a6;
+  --color-pal-11: #eab308;
+
+  --shadow-card: var(--card-shadow);
 }
 
 @layer base {
@@ -98,12 +213,22 @@
     @apply border-border outline-ring/50;
   }
   html {
-    color-scheme: light dark;
+    color-scheme: light;
     /* The scrollbar's space stays reserved, so locking the scroll does not shift the page. */
     scrollbar-gutter: stable;
   }
+  html[data-theme='dark'] {
+    color-scheme: dark;
+  }
   body {
     @apply bg-background text-foreground antialiased;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  code,
+  pre,
+  kbd {
+    @apply font-mono;
   }
   /*
    * The scroll lock while a modal overlay (menu, dialog) is open. Radix's scroll-lock library
@@ -113,5 +238,29 @@
   body[data-scroll-locked] {
     overflow: hidden !important;
     overscroll-behavior: contain;
+  }
+}
+
+@layer components {
+  /* A status edge on the first cell of a table row (D-047: classes, never inline styles). */
+  .edge-ok > :first-child {
+    box-shadow: inset 3px 0 0 var(--tone-ok);
+  }
+  .edge-info > :first-child {
+    box-shadow: inset 3px 0 0 var(--tone-info);
+  }
+  .edge-warn > :first-child {
+    box-shadow: inset 3px 0 0 var(--tone-warn);
+  }
+  .edge-bad > :first-child {
+    box-shadow: inset 3px 0 0 var(--tone-bad);
+  }
+  .edge-off > :first-child {
+    box-shadow: inset 3px 0 0 var(--tone-off);
+  }
+  /* Long unbroken text (URLs, tokens, JSON without spaces) wraps anywhere inside its card. */
+  .wrap-anywhere {
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 }

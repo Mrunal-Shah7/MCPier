@@ -6,7 +6,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createAdaptorServer } from '@hono/node-server';
 import { createMcpHandler } from '@modelcontextprotocol/server';
-import { createFakeServer } from './tools.js';
+import { createFakeServer, type FixtureServerInfo } from './tools.js';
 
 /** Switches. They live on `fixture.options` and may be changed while the fixture runs. */
 export interface OAuthFixtureOptions {
@@ -43,6 +43,10 @@ export interface OAuthFixtureOptions {
   tokenEndpointDown: boolean;
   /** `scopes_supported` in both metadata documents. */
   scopesSupported: string[];
+  /** The scope in the 401 challenge (default "mcp:tools"; null leaves it out). */
+  challengeScope?: string | null;
+  /** Logos and a website the MCP server announces in its `serverInfo`. */
+  serverInfo?: FixtureServerInfo;
 }
 
 export interface OAuthFixtureLog {
@@ -58,7 +62,13 @@ export interface OAuthFixtureLog {
   /** CIMD URLs fetched. */
   cimdFetches: string[];
   /** MCP requests by outcome. */
-  mcp: { ok: number; unauthorized: number; forbidden: number };
+  mcp: {
+    ok: number;
+    unauthorized: number;
+    forbidden: number;
+    /** The `Mcp-Method` of each 401, in order (a health check is `tools/list`). */
+    unauthorizedMethods: string[];
+  };
 }
 
 export interface OAuthFixture {
@@ -188,7 +198,7 @@ export async function startOAuthFixture(overrides: Partial<OAuthFixtureOptions> 
     refreshes: 0,
     revocations: [],
     cimdFetches: [],
-    mcp: { ok: 0, unauthorized: 0, forbidden: 0 },
+    mcp: { ok: 0, unauthorized: 0, forbidden: 0, unauthorizedMethods: [] },
   };
   const issued: string[] = [];
   const received: string[] = [];
@@ -438,9 +448,16 @@ export async function startOAuthFixture(overrides: Partial<OAuthFixtureOptions> 
     return undefined;
   };
 
-  const handler = createMcpHandler(() => createFakeServer('fake-oauth-http', { modernTools: true }), {
-    legacy: 'reject',
-  });
+  const handler = createMcpHandler(
+    () =>
+      createFakeServer('fake-oauth-http', {
+        modernTools: true,
+        ...(options.serverInfo ? { serverInfo: options.serverInfo } : {}),
+      }),
+    {
+      legacy: 'reject',
+    },
+  );
 
   const rsHandler: Handler = async (request) => {
     const url = new URL(request.url);
@@ -460,9 +477,11 @@ export async function startOAuthFixture(overrides: Partial<OAuthFixtureOptions> 
     if (url.pathname !== '/mcp') return undefined;
     const bearer = /^Bearer\s+(\S+)$/i.exec(request.headers.get('authorization') ?? '')?.[1];
     const token = bearer ? accessTokens.get(bearer) : undefined;
-    const challenge = `Bearer resource_metadata="${resourceMetadataUrl}", scope="mcp:tools"`;
+    const scope = options.challengeScope === undefined ? 'mcp:tools' : options.challengeScope;
+    const challenge = `Bearer resource_metadata="${resourceMetadataUrl}"${scope === null ? '' : `, scope="${scope}"`}`;
     if (!token || !token.valid || token.expiresAt <= Date.now() || token.resource !== resource) {
       log.mcp.unauthorized++;
+      log.mcp.unauthorizedMethods.push(request.headers.get('mcp-method') ?? request.method);
       return new Response(JSON.stringify({ error: 'unauthorized' }), {
         status: 401,
         headers: {

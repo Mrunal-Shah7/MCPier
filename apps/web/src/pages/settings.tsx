@@ -13,7 +13,19 @@ import {
 } from '@mcpier/shared';
 import { api } from '@/lib/api';
 import { queryKeys, useSettings, useStatus } from '@/lib/queries';
-import { CopyButton, ErrorMessage, formatTime, LoadingRows, PageHeader } from '@/components/common';
+import { CheckIcon } from 'lucide-react';
+import { CopyButton, ErrorMessage, formatTime, LoadingRows } from '@/components/common';
+import {
+  InfoTip,
+  KeyValues,
+  PageTitle,
+  Panel,
+  PanelBody,
+  PanelHeader,
+  RailGrid,
+  Stack,
+} from '@/components/kit';
+import { ToneBadge } from '@/components/status-badge';
 import { useToast } from '@/components/toaster';
 import { Button } from '@/components/ui/button';
 import {
@@ -157,6 +169,7 @@ function NumberField({
   label,
   value,
   onChange,
+  info,
   hint,
   problem,
 }: {
@@ -164,12 +177,18 @@ function NumberField({
   label: string;
   value: string;
   onChange: (value: string) => void;
+  info?: string;
   hint?: string;
   problem?: string;
 }) {
   return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id}>{label}</Label>
+    <div>
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <Label htmlFor={id} className="text-muted-foreground text-xs font-semibold">
+          {label}
+        </Label>
+        {info ? <InfoTip label={`About ${label}`}>{info}</InfoTip> : null}
+      </div>
       <Input
         id={id}
         inputMode="numeric"
@@ -178,13 +197,30 @@ function NumberField({
         onChange={(event) => onChange(event.target.value)}
       />
       {problem ? (
-        <p className="text-destructive text-xs" role="alert">
+        <p className="text-tone-bad-text mt-1 text-xs" role="alert">
           {label} {problem}.
         </p>
       ) : hint ? (
-        <p className="text-muted-foreground text-xs">{hint}</p>
+        <p className="text-faint mt-1 text-xs">{hint}</p>
       ) : null}
     </div>
+  );
+}
+
+/** A weight as a small bar (SVG attributes only), on a scale of 10. */
+function WeightBar({ value }: { value: string }) {
+  const number = Number(value);
+  const width = Number.isFinite(number) ? Math.min(Math.max(number, 0), 10) * 10 : 0;
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 100 8"
+      preserveAspectRatio="none"
+      className="mt-1.5 block h-1.5 w-full"
+    >
+      <rect x={0} y={0} width={100} height={8} rx={4} className="fill-panel-3" />
+      {width > 0 ? <rect x={0} y={0} width={width} height={8} rx={4} className="fill-tone-ok" /> : null}
+    </svg>
   );
 }
 
@@ -219,159 +255,201 @@ export function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Settings" description="Saved to config.json and applied at once, except the port." />
-      <form
-        className="space-y-8"
-        noValidate
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (problems.size === 0) save.mutate(settingsPatch(form));
-        }}
-      >
-        <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <NumberField
-            id="setting-port"
-            label="Port"
-            value={form.port}
-            onChange={(port) => set({ port })}
-            problem={problems.get('port')}
-            hint="Takes effect after MCPier restarts; then update your clients (Connect page)."
-          />
-          <NumberField
-            id="setting-result-size"
-            label="Result size limit (KB)"
-            value={form.resultSizeLimitKb}
-            onChange={(resultSizeLimitKb) => set({ resultSizeLimitKb })}
-            problem={problems.get('resultSizeLimitKb')}
-            hint="Text results above this are cut, with a note."
-          />
-          <NumberField
-            id="setting-retention"
-            label="Log retention (days)"
-            value={form.logRetentionDays}
-            onChange={(logRetentionDays) => set({ logRetentionDays })}
-            problem={problems.get('logRetentionDays')}
-          />
-          <div className="flex items-center gap-2 self-end pb-2">
-            <Switch
-              id="setting-bodies"
-              checked={form.storeCallBodies}
-              onCheckedChange={(storeCallBodies) => set({ storeCallBodies })}
-            />
-            <Label htmlFor="setting-bodies">Store call bodies in the call log</Label>
-          </div>
-        </section>
-
-        <section className="space-y-2">
-          <h2 className="text-sm font-semibold">Extra PATH folders</h2>
-          <p className="text-muted-foreground text-xs">
-            Added to PATH for stdio servers. Changing them restarts those servers.
-          </p>
-          {form.extraPath.map((path, index) => (
-            <div key={index} className="flex gap-2">
-              <Input
-                aria-label={`Extra PATH folder ${index + 1}`}
-                value={path}
-                onChange={(event) =>
-                  set({
-                    extraPath: form.extraPath.map((other, i) => (i === index ? event.target.value : other)),
-                  })
-                }
+      <PageTitle
+        title="Settings"
+        info="Saved to config.json and applied at once, except the port."
+        actions={
+          <Button type="submit" form="settings-form" disabled={problems.size > 0 || save.isPending}>
+            <CheckIcon aria-hidden="true" />
+            Save settings
+          </Button>
+        }
+      />
+      <RailGrid>
+        <form
+          id="settings-form"
+          className="flex min-w-0 flex-col gap-4"
+          noValidate
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (problems.size === 0) save.mutate(settingsPatch(form));
+          }}
+        >
+          <Panel aria-label="General">
+            <PanelHeader title="General" />
+            <PanelBody className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <NumberField
+                id="setting-port"
+                label="Port"
+                value={form.port}
+                onChange={(port) => set({ port })}
+                problem={problems.get('port')}
+                info="Takes effect after MCPier restarts; then update your clients (Connect page)."
               />
+              <NumberField
+                id="setting-result-size"
+                label="Result size limit (KB)"
+                value={form.resultSizeLimitKb}
+                onChange={(resultSizeLimitKb) => set({ resultSizeLimitKb })}
+                problem={problems.get('resultSizeLimitKb')}
+                info="Text results above this are cut for the model, with a note."
+              />
+              <div className="space-y-2 md:col-span-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-muted-foreground text-xs font-semibold">Extra PATH folders</span>
+                  <InfoTip label="About extra PATH folders">
+                    Added to PATH for stdio servers. Changing them restarts those servers.
+                  </InfoTip>
+                </div>
+                {form.extraPath.map((path, index) => (
+                  <div key={index} className="flex gap-2">
+                    <Input
+                      aria-label={`Extra PATH folder ${index + 1}`}
+                      className="font-mono"
+                      value={path}
+                      onChange={(event) =>
+                        set({
+                          extraPath: form.extraPath.map((other, i) =>
+                            i === index ? event.target.value : other,
+                          ),
+                        })
+                      }
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => set({ extraPath: form.extraPath.filter((_, i) => i !== index) })}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => set({ extraPath: [...form.extraPath, ''] })}
+                >
+                  Add folder
+                </Button>
+              </div>
+            </PanelBody>
+          </Panel>
+
+          <Panel aria-label="Call log settings">
+            <PanelHeader title="Call log" />
+            <PanelBody className="space-y-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="setting-bodies">Store call bodies</Label>
+                  <span className="flex-1" />
+                  <Switch
+                    id="setting-bodies"
+                    checked={form.storeCallBodies}
+                    onCheckedChange={(storeCallBodies) => set({ storeCallBodies })}
+                  />
+                </div>
+                <p className="text-faint mt-1 text-xs">
+                  Arguments and results of each call, redacted and cut at 64 KB, kept for the retention
+                  period. Off: metadata only, for new calls.
+                </p>
+              </div>
+              <NumberField
+                id="setting-retention"
+                label="Log retention (days)"
+                value={form.logRetentionDays}
+                onChange={(logRetentionDays) => set({ logRetentionDays })}
+                problem={problems.get('logRetentionDays')}
+                info="Older calls and searches are deleted; lowering it deletes at once. Usage covers this period."
+              />
+            </PanelBody>
+          </Panel>
+
+          <Panel aria-label="Search weights">
+            <PanelHeader
+              title="Search weights"
+              info="How much each field counts in search_tools (0 to 100)."
+            />
+            <PanelBody className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {WEIGHT_FIELDS.map(([key, label]) => (
+                <div key={key}>
+                  <NumberField
+                    id={`weight-${key}`}
+                    label={label}
+                    value={form.weights[key]}
+                    onChange={(value) => set({ weights: { ...form.weights, [key]: value } })}
+                    problem={problems.get(`searchWeights.${key}`)}
+                  />
+                  <WeightBar value={form.weights[key]} />
+                </div>
+              ))}
+            </PanelBody>
+          </Panel>
+          {problems.get('_') ? <p className="text-tone-bad-text text-sm">{problems.get('_')}</p> : null}
+          {save.error ? <ErrorMessage error={save.error} title="Could not save the settings" /> : null}
+        </form>
+
+        <Stack>
+          <AutostartSection />
+          <Panel aria-label="CIMD">
+            <PanelHeader
+              title="CIMD"
+              info="An https:// URL where you publish MCPier's client ID metadata document. When it is set, OAuth servers that support such documents use it instead of registering MCPier."
+            />
+            <PanelBody className="space-y-3">
+              <div>
+                <Label
+                  htmlFor="setting-cimd"
+                  className="text-muted-foreground mb-1.5 block text-xs font-semibold"
+                >
+                  Client ID Metadata Document URL (optional)
+                </Label>
+                <Input
+                  id="setting-cimd"
+                  type="url"
+                  form="settings-form"
+                  className="font-mono"
+                  placeholder="https://…/mcpier-client.json"
+                  value={form.cimdUrl}
+                  aria-invalid={problems.has('cimdUrl')}
+                  onChange={(event) => set({ cimdUrl: event.target.value })}
+                />
+                {problems.get('cimdUrl') ? (
+                  <p className="text-tone-bad-text mt-1 text-xs" role="alert">
+                    The URL {problems.get('cimdUrl')}.
+                  </p>
+                ) : null}
+              </div>
               <Button
                 type="button"
-                variant="ghost"
-                onClick={() => set({ extraPath: form.extraPath.filter((_, i) => i !== index) })}
+                variant="outline"
+                size="sm"
+                disabled={!settings.data?.settings.cimdUrl}
+                onClick={() => setShowCimd(true)}
               >
-                Remove
+                Show CIMD document
               </Button>
-            </div>
-          ))}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => set({ extraPath: [...form.extraPath, ''] })}
-          >
-            Add folder
-          </Button>
-        </section>
-
-        <section className="space-y-2">
-          <h2 className="text-sm font-semibold">Search weights</h2>
-          <p className="text-muted-foreground text-xs">
-            How much each field counts in search_tools (0 to 100).
-          </p>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {WEIGHT_FIELDS.map(([key, label]) => (
-              <NumberField
-                key={key}
-                id={`weight-${key}`}
-                label={label}
-                value={form.weights[key]}
-                onChange={(value) => set({ weights: { ...form.weights, [key]: value } })}
-                problem={problems.get(`searchWeights.${key}`)}
-              />
-            ))}
-          </div>
-        </section>
-
-        <section className="space-y-1.5">
-          <Label htmlFor="setting-cimd">Client ID Metadata Document URL (optional)</Label>
-          <Input
-            id="setting-cimd"
-            type="url"
-            value={form.cimdUrl}
-            aria-invalid={problems.has('cimdUrl')}
-            onChange={(event) => set({ cimdUrl: event.target.value })}
-          />
-          {problems.get('cimdUrl') ? (
-            <p className="text-destructive text-xs" role="alert">
-              The URL {problems.get('cimdUrl')}.
-            </p>
-          ) : (
-            <p className="text-muted-foreground text-xs">
-              An https:// URL where you publish MCPier's client ID metadata document. When it is set, OAuth
-              servers that support such documents use it instead of registering MCPier.
-            </p>
-          )}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={!settings.data?.settings.cimdUrl}
-            onClick={() => setShowCimd(true)}
-          >
-            Show CIMD document
-          </Button>
-          <CimdDocumentDialog open={showCimd} onOpenChange={setShowCimd} />
-        </section>
-
-        {problems.get('_') ? <p className="text-destructive text-sm">{problems.get('_')}</p> : null}
-        {save.error ? <ErrorMessage error={save.error} title="Could not save the settings" /> : null}
-        <Button type="submit" disabled={problems.size > 0 || save.isPending}>
-          Save settings
-        </Button>
-      </form>
-
-      {status.data ? (
-        <section className="mt-10 space-y-2">
-          <h2 className="text-sm font-semibold">About this gateway</h2>
-          <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-[10rem_1fr]">
-            <dt className="text-muted-foreground">Version</dt>
-            <dd>{status.data.version}</dd>
-            <dt className="text-muted-foreground">Data directory</dt>
-            <dd className="font-mono text-xs break-all">{status.data.dataDir}</dd>
-            <dt className="text-muted-foreground">Process id</dt>
-            <dd>{status.data.pid}</dd>
-            <dt className="text-muted-foreground">Started</dt>
-            <dd>{formatTime(status.data.startedAt)}</dd>
-            <dt className="text-muted-foreground">Listening on</dt>
-            <dd>127.0.0.1:{status.data.port}</dd>
-          </dl>
-        </section>
-      ) : null}
-      <AutostartSection />
+              <CimdDocumentDialog open={showCimd} onOpenChange={setShowCimd} />
+            </PanelBody>
+          </Panel>
+          {status.data ? (
+            <Panel aria-label="About this gateway">
+              <PanelHeader title="About" />
+              <PanelBody>
+                <KeyValues
+                  rows={[
+                    ['Version', status.data.version],
+                    ['Data', <span className="font-mono text-xs">{status.data.dataDir}</span>],
+                    ['Process ID', String(status.data.pid)],
+                    ['Running since', formatTime(status.data.startedAt)],
+                    ['Listening on', `127.0.0.1:${status.data.port}`],
+                  ]}
+                />
+              </PanelBody>
+            </Panel>
+          ) : null}
+        </Stack>
+      </RailGrid>
     </>
   );
 }
@@ -386,48 +464,61 @@ function AutostartSection() {
   const status = data?.status;
   const missing = status?.paths?.filter((path) => !path.exists) ?? [];
   return (
-    <section className="mt-10 space-y-2" aria-label="Start with Windows">
-      <h2 className="text-sm font-semibold">Start with Windows</h2>
-      {autostart.isPending ? <LoadingRows rows={1} label="Loading the autostart status" /> : null}
-      {autostart.error ? (
-        <p className="text-muted-foreground text-sm">
-          The autostart status cannot be checked here. In a terminal:{' '}
-          <code className="font-mono">mcpier autostart status</code>
-        </p>
-      ) : null}
-      {status ? (
-        <div
-          className="space-y-2 text-sm"
-          data-autostart={status.unknown ? 'unknown' : status.enabled ? 'on' : 'off'}
-        >
-          {status.unknown ? (
-            <p className="text-muted-foreground">Could not check it: {status.detail}</p>
-          ) : status.enabled ? (
-            <p>
-              On: MCPier starts, hidden, when you sign in to Windows (logon task{' '}
-              <code className="font-mono">{status.taskName}</code>).
-            </p>
-          ) : (
-            <p>Off: MCPier starts when you run it, or when a client starts the stdio bridge.</p>
-          )}
-          {missing.length > 0 ? (
-            <p className="text-destructive">
-              The task points at {missing.map((path) => path.path).join(' and ')}, which no longer{' '}
-              {missing.length === 1 ? 'exists' : 'exist'}. Run the enable command again.
-            </p>
-          ) : null}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-muted-foreground">To change it, run in a terminal:</span>
-            <code className="bg-muted rounded px-1.5 py-0.5 font-mono text-xs">
-              {status.enabled ? data.commands.disable : data.commands.enable}
-            </code>
-            <CopyButton
-              text={status.enabled ? data.commands.disable : data.commands.enable}
-              label="Copy the autostart command"
-            />
+    <Panel aria-label="Start with Windows">
+      <PanelHeader
+        title="Start with Windows"
+        actions={
+          status ? (
+            <ToneBadge tone={status.unknown ? 'off' : status.enabled ? 'ok' : 'off'}>
+              {status.unknown ? 'Unknown' : status.enabled ? 'On' : 'Off'}
+            </ToneBadge>
+          ) : undefined
+        }
+      />
+      <PanelBody className="space-y-2 text-sm">
+        {autostart.isPending ? <LoadingRows rows={1} label="Loading the autostart status" /> : null}
+        {autostart.error ? (
+          <p className="text-muted-foreground m-0">
+            The autostart status cannot be checked here. In a terminal:{' '}
+            <code className="font-mono">mcpier autostart status</code>
+          </p>
+        ) : null}
+        {status ? (
+          <div
+            className="space-y-2"
+            data-autostart={status.unknown ? 'unknown' : status.enabled ? 'on' : 'off'}
+          >
+            {status.unknown ? (
+              <p className="text-muted-foreground m-0">Could not check it: {status.detail}</p>
+            ) : status.enabled ? (
+              <p className="m-0">
+                On: MCPier starts, hidden, when you sign in to Windows (logon task{' '}
+                <code className="font-mono">{status.taskName}</code>).
+              </p>
+            ) : (
+              <p className="m-0">
+                Off: MCPier starts when you run it, or when a client starts the stdio bridge.
+              </p>
+            )}
+            {missing.length > 0 ? (
+              <p className="text-tone-bad-text m-0">
+                The task points at {missing.map((path) => path.path).join(' and ')}, which no longer{' '}
+                {missing.length === 1 ? 'exists' : 'exist'}. Run the enable command again.
+              </p>
+            ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-muted-foreground">To change it, run in a terminal:</span>
+              <code className="bg-panel-2 rounded border px-1.5 py-0.5 font-mono text-xs">
+                {status.enabled ? data.commands.disable : data.commands.enable}
+              </code>
+              <CopyButton
+                text={status.enabled ? data.commands.disable : data.commands.enable}
+                label="Copy the autostart command"
+              />
+            </div>
           </div>
-        </div>
-      ) : null}
-    </section>
+        ) : null}
+      </PanelBody>
+    </Panel>
   );
 }

@@ -3,6 +3,8 @@ import {
   CALL_BODY_LIMIT_BYTES,
   CALL_PAGE_SIZE_MAX,
   CALL_OUTCOME_NAMES,
+  cleanErrorMessage,
+  estimateTokens,
   isErrorOutcome,
   SEARCH_FOLLOWUP_WINDOW_MS,
   SEARCH_FOLLOWUPS,
@@ -17,10 +19,12 @@ import {
   type ServerCallStats,
   type Settings,
   type StoredBody,
+  type UsageResponse,
 } from '@mcpier/shared';
 import type { Logger } from '../logger.js';
 import type { CallEvent, Recorder, SearchEvent } from '../meta/recorder.js';
 import type { Db } from './database.js';
+import { usageReport, type UsageQuery } from './usage.js';
 
 /** Writes are flushed at least this often. */
 export const FLUSH_INTERVAL_MS = 250;
@@ -110,6 +114,9 @@ interface CallRow {
   result?: string | null;
   result_truncated?: number;
   error_text: string | null;
+  result_bytes: number | null;
+  error_message: string | null;
+  error_code: number | null;
 }
 
 interface SearchRow {
@@ -128,6 +135,7 @@ interface SearchRow {
   followup_call_id: number | null;
   hit_rank: number | null;
   called_tool: string | null;
+  result_bytes: number | null;
 }
 
 type Queued =
@@ -189,13 +197,17 @@ export class CallLog extends EventEmitter<{ recorded: [CallSummary] }> implement
     this.now = options.now ?? Date.now;
     this.insertCall = db.prepare(
       `INSERT INTO calls (at, client_name, client_version, era, tool, server, duration_ms, outcome, trace_id,
-         bodies_stored, arguments, arguments_truncated, result, result_truncated, error_text)
+         bodies_stored, arguments, arguments_truncated, result, result_truncated, error_text, result_bytes,
+         error_message, error_code)
        VALUES (@at, @client_name, @client_version, @era, @tool, @server, @duration_ms, @outcome, @trace_id,
-         @bodies_stored, @arguments, @arguments_truncated, @result, @result_truncated, @error_text)`,
+         @bodies_stored, @arguments, @arguments_truncated, @result, @result_truncated, @error_text, @result_bytes,
+         @error_message, @error_code)`,
     );
     this.insertSearch = db.prepare(
-      `INSERT INTO searches (at, client_name, client_version, era, query, server, limit_n, result_count, results, duration_ms)
-       VALUES (@at, @client_name, @client_version, @era, @query, @server, @limit_n, @result_count, @results, @duration_ms)`,
+      `INSERT INTO searches (at, client_name, client_version, era, query, server, limit_n, result_count, results,
+         duration_ms, result_bytes)
+       VALUES (@at, @client_name, @client_version, @era, @query, @server, @limit_n, @result_count, @results,
+         @duration_ms, @result_bytes)`,
     );
     this.previousCallAt = db.prepare(
       `SELECT MAX(at) AS at FROM calls
@@ -276,6 +288,7 @@ export class CallLog extends EventEmitter<{ recorded: [CallSummary] }> implement
       result_count: event.resultCount,
       results: JSON.stringify(event.results),
       duration_ms: Math.round(event.durationMs),
+      result_bytes: event.resultBytes ?? null,
     });
   }
 
@@ -286,6 +299,9 @@ export class CallLog extends EventEmitter<{ recorded: [CallSummary] }> implement
         ? { arguments: capBody(serialize(event.arguments ?? {})), result: capBody(serialize(event.result)) }
         : undefined;
     const errorText = event.errorText ? event.errorText.slice(0, ERROR_TEXT_MAX) : null;
+    // Cleaned from the full text, before the 500-character cut: a long JSON-RPC wrapper cut
+    // short is no longer JSON, and its sentence could not be found afterwards.
+    const clean = event.errorText ? cleanErrorMessage(event.errorText) : undefined;
     const client = { client_name: event.client.name ?? null, client_version: event.client.version ?? null };
     const info = this.insertCall.run({
       at,
@@ -302,9 +318,13 @@ export class CallLog extends EventEmitter<{ recorded: [CallSummary] }> implement
       result: bodies?.result.text ?? null,
       result_truncated: bodies?.result.truncated ? 1 : 0,
       error_text: errorText,
+      result_bytes: event.resultBytes ?? null,
+      error_message: clean ? clean.message.slice(0, ERROR_TEXT_MAX) : null,
+      error_code: clean?.code ?? null,
     });
     const id = Number(info.lastInsertRowid);
     this.link(id, at, event.tool, { ...client, era: event.era });
+    const tokens = estimateTokens(event.resultBytes);
     return {
       id,
       at: new Date(at).toISOString(),
@@ -316,6 +336,8 @@ export class CallLog extends EventEmitter<{ recorded: [CallSummary] }> implement
       outcome: event.outcome,
       ...(event.traceId ? { traceId: event.traceId } : {}),
       bodiesStored: Boolean(bodies),
+      ...(event.resultBytes !== undefined ? { resultBytes: event.resultBytes } : {}),
+      ...(tokens !== undefined ? { estimatedTokens: tokens } : {}),
     };
   }
 
@@ -346,6 +368,14 @@ export class CallLog extends EventEmitter<{ recorded: [CallSummary] }> implement
   // ---- Reading
 
   private toSummary(row: CallRow): CallListItem {
+    const tokens = estimateTokens(row.result_bytes);
+    // Rows recorded before 1.1.0 have no clean message stored: it is computed from the text now.
+    const clean =
+      row.error_text === null
+        ? undefined
+        : row.error_message !== null
+          ? { message: row.error_message, code: row.error_code ?? undefined }
+          : cleanErrorMessage(row.error_text);
     return {
       id: row.id,
       at: new Date(row.at).toISOString(),
@@ -360,7 +390,11 @@ export class CallLog extends EventEmitter<{ recorded: [CallSummary] }> implement
       outcome: row.outcome as CallOutcomeName,
       ...(row.trace_id !== null ? { traceId: row.trace_id } : {}),
       bodiesStored: row.bodies_stored === 1,
+      ...(row.result_bytes !== null ? { resultBytes: row.result_bytes } : {}),
+      ...(tokens !== undefined ? { estimatedTokens: tokens } : {}),
       ...(row.error_text !== null ? { errorText: row.error_text } : {}),
+      ...(clean ? { errorMessage: clean.message } : {}),
+      ...(clean?.code !== undefined ? { errorCode: clean.code } : {}),
     };
   }
 
@@ -385,7 +419,7 @@ export class CallLog extends EventEmitter<{ recorded: [CallSummary] }> implement
     const rows = this.db
       .prepare(
         `SELECT id, at, client_name, client_version, era, tool, server, duration_ms, outcome, trace_id,
-           bodies_stored, error_text
+           bodies_stored, error_text, result_bytes, error_message, error_code
          FROM calls ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
          ORDER BY id DESC LIMIT @limit`,
       )
@@ -435,7 +469,7 @@ export class CallLog extends EventEmitter<{ recorded: [CallSummary] }> implement
       .prepare(
         `SELECT s.id, s.at, s.client_name, s.client_version, s.era, s.query, s.server, s.limit_n, s.result_count,
            s.results, s.duration_ms, ${this.followupSql()} AS followup, s.followup_call_id, s.hit_rank,
-           c.tool AS called_tool
+           c.tool AS called_tool, s.result_bytes
          FROM searches s LEFT JOIN calls c ON c.id = s.followup_call_id
          ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
          ORDER BY s.id DESC LIMIT @limit`,
@@ -459,6 +493,9 @@ export class CallLog extends EventEmitter<{ recorded: [CallSummary] }> implement
       ...(row.followup_call_id !== null ? { followupCallId: row.followup_call_id } : {}),
       ...(row.called_tool !== null ? { calledTool: row.called_tool } : {}),
       ...(row.hit_rank !== null ? { rank: row.hit_rank } : {}),
+      ...(row.result_bytes !== null
+        ? { resultBytes: row.result_bytes, estimatedTokens: estimateTokens(row.result_bytes)! }
+        : {}),
     }));
     return rows.length > limit
       ? { searches: page, nextCursor: encodeCursor(page.at(-1)!.id) }
@@ -474,21 +511,32 @@ export class CallLog extends EventEmitter<{ recorded: [CallSummary] }> implement
       stale: this.now() - SEARCH_FOLLOWUP_WINDOW_MS,
     };
     const calls = this.db
-      .prepare('SELECT server, outcome, duration_ms FROM calls WHERE at >= @from AND at <= @to')
-      .all(params) as { server: string | null; outcome: CallOutcomeName; duration_ms: number }[];
+      .prepare('SELECT server, outcome, duration_ms, result_bytes FROM calls WHERE at >= @from AND at <= @to')
+      .all(params) as {
+      server: string | null;
+      outcome: CallOutcomeName;
+      duration_ms: number;
+      result_bytes: number | null;
+    }[];
     const byOutcome: Partial<Record<CallOutcomeName, number>> = {};
-    const perServer = new Map<string, { durations: number[]; errors: number }>();
+    const perServer = new Map<string, { durations: number[]; errors: number; tokens: number }>();
     const all: number[] = [];
     let errors = 0;
+    let tokens = 0;
+    let withoutSize = 0;
     for (const call of calls) {
       byOutcome[call.outcome] = (byOutcome[call.outcome] ?? 0) + 1;
       const failed = isErrorOutcome(call.outcome);
       if (failed) errors++;
       all.push(call.duration_ms);
+      const callTokens = estimateTokens(call.result_bytes);
+      if (callTokens === undefined) withoutSize++;
+      else tokens += callTokens;
       const key = call.server ?? '(unknown)';
-      const entry = perServer.get(key) ?? { durations: [], errors: 0 };
+      const entry = perServer.get(key) ?? { durations: [], errors: 0, tokens: 0 };
       entry.durations.push(call.duration_ms);
       if (failed) entry.errors++;
+      entry.tokens += callTokens ?? 0;
       perServer.set(key, entry);
     }
     all.sort((a, b) => a - b);
@@ -501,6 +549,7 @@ export class CallLog extends EventEmitter<{ recorded: [CallSummary] }> implement
           errors: entry.errors,
           p50Ms: percentile(sorted, 0.5),
           p95Ms: percentile(sorted, 0.95),
+          tokens: entry.tokens,
         };
       })
       .sort((a, b) => b.calls - a.calls || a.server.localeCompare(b.server));
@@ -532,6 +581,8 @@ export class CallLog extends EventEmitter<{ recorded: [CallSummary] }> implement
         p95Ms: all.length > 0 ? percentile(all, 0.95) : null,
         byOutcome,
         byServer,
+        tokens,
+        callsWithoutSize: withoutSize,
       },
       searches: {
         total: SEARCH_FOLLOWUPS.reduce((sum, kind) => sum + count(kind), 0),
@@ -549,6 +600,20 @@ export class CallLog extends EventEmitter<{ recorded: [CallSummary] }> implement
         calledTool: row.tool,
       })),
     };
+  }
+
+  /** The time the log works with (injectable in tests). */
+  clock(): number {
+    return this.now();
+  }
+
+  /** Usage over a range: totals, the previous period, local-time buckets and breakdowns. */
+  usage(query: UsageQuery): UsageResponse {
+    this.flush();
+    return usageReport(this.db, query, {
+      now: this.now(),
+      retentionDays: this.options.settings().logRetentionDays,
+    });
   }
 
   // ---- Upkeep

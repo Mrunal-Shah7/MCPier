@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ensureDataDir, getPlatform, probeHealth, readAdminToken, readPidFile } from '@mcpier/core';
 import { runCli, type CliResult } from '../../../test/helpers/cli.js';
@@ -22,7 +22,7 @@ describe('mcpier CLI basics', () => {
     try {
       for (const flag of ['--version', '-v']) {
         const result = await runCli([flag], home.env());
-        expect(result).toMatchObject({ code: 0, stdout: '1.0.0\n' });
+        expect(result).toMatchObject({ code: 0, stdout: '1.1.0\n' });
       }
     } finally {
       await home.cleanup();
@@ -144,7 +144,7 @@ describe('mcpier start / status / stop (built CLI, temporary home, random port)'
     expect(status).toMatchObject({
       running: true,
       url: `http://127.0.0.1:${port}/`,
-      version: '1.0.0',
+      version: '1.1.0',
       pid: readPidFile(home.paths.pidFile)?.pid,
       port,
       dataDir: home.dir,
@@ -205,6 +205,26 @@ describe('mcpier start / status / stop (built CLI, temporary home, random port)'
       expect(stop.code).toBe(0);
     } finally {
       await fresh.cleanup();
+    }
+  });
+});
+
+// Sprint 7, BUGS B-2: the gateway runs in its data folder, so a relative MCPIER_HOME must reach
+// it already resolved, or it would use <home>\<home>.
+describe('mcpier start with a relative MCPIER_HOME', () => {
+  it('the gateway uses the folder the caller meant', async () => {
+    const home = createTempHome();
+    const freshPort = await getFreePort();
+    const parent = dirname(home.dir);
+    const env = { ...home.env(freshPort), MCPIER_HOME: basename(home.dir) };
+    try {
+      expect((await runCli(['start'], env, { cwd: parent })).code).toBe(0);
+      const status = await runCli(['status', '--json'], env, { cwd: parent });
+      expect(JSON.parse(status.stdout)).toMatchObject({ running: true, dataDir: home.dir });
+      expect(existsSync(join(home.dir, basename(home.dir)))).toBe(false);
+      expect((await runCli(['stop'], env, { cwd: parent })).code).toBe(0);
+    } finally {
+      await home.cleanup();
     }
   });
 });

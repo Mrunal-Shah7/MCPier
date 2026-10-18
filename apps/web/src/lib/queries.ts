@@ -15,6 +15,7 @@ import {
   type ToolListResponse,
 } from '@mcpier/shared';
 import { api, ApiError } from './api';
+import { refreshUsageThrottled } from './usage';
 
 export const queryKeys = {
   status: ['status'] as const,
@@ -163,6 +164,8 @@ export function applyEvent(client: Client, event: GatewayEvent): void {
       // while shown). A search's follow-up may have changed with this call.
       void client.invalidateQueries({ queryKey: ['call-stats'] });
       void client.invalidateQueries({ queryKey: ['searches'] });
+      // Charts and rails that count calls refetch at most once every 5 seconds.
+      refreshUsageThrottled(client);
       return;
     }
   }

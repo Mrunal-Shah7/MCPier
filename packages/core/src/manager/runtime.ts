@@ -1,5 +1,11 @@
 import { EventEmitter } from 'node:events';
-import type { ServerEntry, ServerStatus, ServerStatusInfo, Settings } from '@mcpier/shared';
+import {
+  cleanErrorMessage,
+  type ServerEntry,
+  type ServerStatus,
+  type ServerStatusInfo,
+  type Settings,
+} from '@mcpier/shared';
 import type { Logger } from '../logger.js';
 import type { ChildGuard, Platform, SecretStore } from '../platform/index.js';
 import { createRedactor, redactDeep, type Redactor } from '../secrets/redact.js';
@@ -16,6 +22,7 @@ import {
   type Connector,
   type Tool,
   type UpstreamCallResult,
+  type UpstreamServerInfo,
 } from '../upstream/types.js';
 import { ConflictError } from './errors.js';
 
@@ -77,6 +84,7 @@ export class ServerRuntime extends EventEmitter<RuntimeEvents> {
   private connector: Connector | undefined;
   private lastTools: Tool[] = [];
   private lastProtocolVersion: string | undefined;
+  private lastServerInfo: UpstreamServerInfo | undefined;
   private readySince: number | undefined;
   private generation = 0;
   private failures: number[] = [];
@@ -112,6 +120,11 @@ export class ServerRuntime extends EventEmitter<RuntimeEvents> {
     return this.connector?.protocolVersion ?? this.lastProtocolVersion;
   }
 
+  /** The logo and website the server named when it last connected (icons). */
+  get serverInfo(): UpstreamServerInfo | undefined {
+    return this.lastServerInfo;
+  }
+
   get uptimeSeconds(): number | undefined {
     return this.statusInfo.state === 'ready' && this.readySince !== undefined
       ? Math.round((Date.now() - this.readySince) / 1000)
@@ -131,10 +144,13 @@ export class ServerRuntime extends EventEmitter<RuntimeEvents> {
   private setStatus(state: ServerStatus, detail?: string): void {
     const cleanDetail = detail === undefined ? undefined : this.redact(detail);
     if (this.statusInfo.state === state && this.statusInfo.detail === cleanDetail) return;
+    // The sentence inside a wrapped JSON-RPC or OAuth error, for the dashboard (the raw text stays).
+    const readable = cleanDetail ? cleanErrorMessage(cleanDetail).message : undefined;
     this.statusInfo = {
       state,
       since: new Date().toISOString(),
       ...(cleanDetail ? { detail: cleanDetail } : {}),
+      ...(readable && readable !== cleanDetail ? { detailMessage: readable } : {}),
     };
     if (state !== 'ready') this.readySince = undefined;
     const fields = { server: this.name, status: state, ...(cleanDetail ? { detail: cleanDetail } : {}) };
@@ -239,6 +255,7 @@ export class ServerRuntime extends EventEmitter<RuntimeEvents> {
     }
     this.connector = connector;
     this.lastProtocolVersion = connector.protocolVersion;
+    this.lastServerInfo = connector.serverInfo;
     connector.on('lost', (reason) => {
       if (generation !== this.generation || this.connector !== connector) return;
       this.connector = undefined;

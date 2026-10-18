@@ -6,6 +6,7 @@ export * from './http-common.js';
 export * from './http-stateless.js';
 export * from './http-legacy.js';
 export * from './http-oauth.js';
+export * from './icon-host.js';
 
 const built = (file: string) => fileURLToPath(new URL(`../dist/${file}`, import.meta.url));
 

@@ -9,7 +9,13 @@ import {
   SEARCH_FOLLOWUPS,
   TESTER_CLIENT_NAME,
   TesterCallRequestSchema,
+  USAGE_BUCKETS,
+  USAGE_PATH,
+  USAGE_RANGES,
   ValidateArgumentsRequestSchema,
+  type UsageBucket,
+  type UsageRangeName,
+  type UsageResponse,
   type CallListResponse,
   type CallOutcomeName,
   type CallStatsResponse,
@@ -23,6 +29,7 @@ import type { Logger } from '../logger.js';
 import { ConflictError, InvalidRequestError, NotFoundError } from '../manager/errors.js';
 import { runCallTool } from '../meta/meta-tools.js';
 import type { CallLog } from '../store/call-log.js';
+import { rangeBounds } from '../store/usage.js';
 import { isInputRequired } from '../upstream/types.js';
 import type { AppServices } from './app.js';
 import { rawToolCall } from './routes.js';
@@ -135,6 +142,43 @@ export function registerCallLogRoutes(app: Hono, services: AppServices, _logger:
       );
     }
     return c.json(log().clear() satisfies ClearCallLogResponse);
+  });
+
+  // ---- Usage: `range=24h|7d|30d`, or `from`, `to` and `bucket=hour|day`; optional `server`.
+
+  app.get(USAGE_PATH, (c) => {
+    const rangeName = choiceParam<UsageRangeName>(c, 'range', Object.keys(USAGE_RANGES) as UsageRangeName[]);
+    const from = timeParam(c, 'from');
+    const to = timeParam(c, 'to');
+    const bucketParam = choiceParam<UsageBucket>(c, 'bucket', USAGE_BUCKETS);
+    let bounds: { from: number; to: number; bucket: UsageBucket };
+    if (rangeName) {
+      if (from !== undefined || to !== undefined) {
+        throw new InvalidRequestError('Give either "range", or "from" and "to", not both.');
+      }
+      bounds = rangeBounds(rangeName, log().clock());
+      if (bucketParam) bounds.bucket = bucketParam;
+    } else {
+      if (from === undefined) {
+        throw new InvalidRequestError('Give "range" (24h, 7d or 30d), or "from" (and optionally "to").');
+      }
+      const end = to ?? log().clock();
+      if (end < from) throw new InvalidRequestError('"to" must not be before "from".');
+      bounds = { from, to: end, bucket: bucketParam ?? (end - from <= 2 * 86_400_000 ? 'hour' : 'day') };
+    }
+    const span = bounds.to - bounds.from;
+    if (bounds.bucket === 'hour' && span > 31 * 86_400_000) {
+      throw new InvalidRequestError('Hourly buckets cover at most 31 days; use "bucket=day".');
+    }
+    const server = textParam(c, 'server');
+    const tools = textParam(c, 'tools');
+    if (tools !== undefined && tools !== 'all') throw new InvalidRequestError('"tools" can only be "all".');
+    const body: UsageResponse = log().usage({
+      ...bounds,
+      ...(server ? { server } : {}),
+      ...(tools === 'all' ? { allTools: true } : {}),
+    });
+    return c.json(body);
   });
 
   // ---- Searches

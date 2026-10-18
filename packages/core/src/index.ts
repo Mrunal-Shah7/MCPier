@@ -50,3 +50,8 @@ export * from './oauth/store.js';
 export * from './oauth/pending.js';
 export * from './oauth/service.js';
 export * from './store/index.js';
+export * from './icons/image-type.js';
+export * from './icons/domains.js';
+export * from './icons/fetcher.js';
+export * from './icons/discover.js';
+export * from './icons/service.js';

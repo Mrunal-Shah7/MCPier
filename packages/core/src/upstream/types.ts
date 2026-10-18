@@ -41,6 +41,43 @@ export function isInputRequired(result: unknown): result is InputRequiredOutcome
   return (result as { resultType?: unknown } | undefined)?.resultType === 'input_required';
 }
 
+/** One entry of a server's `serverInfo.icons` (SEP-973). */
+export interface UpstreamIcon {
+  src: string;
+  mimeType?: string;
+  sizes?: string[];
+  theme?: 'light' | 'dark';
+}
+
+/** The parts of a server's `serverInfo` MCPier uses: nothing else is kept. */
+export interface UpstreamServerInfo {
+  icons?: UpstreamIcon[];
+  websiteUrl?: string;
+}
+
+/** Picks `icons` and `websiteUrl` from a server's self-description, checking each field's type. */
+export function pickServerInfo(implementation: unknown): UpstreamServerInfo | undefined {
+  if (typeof implementation !== 'object' || implementation === null) return undefined;
+  const source = implementation as { icons?: unknown; websiteUrl?: unknown };
+  const icons = Array.isArray(source.icons)
+    ? source.icons
+        .filter((icon): icon is Record<string, unknown> => typeof icon === 'object' && icon !== null)
+        .filter((icon) => typeof icon.src === 'string' && icon.src.length > 0)
+        .slice(0, 32)
+        .map((icon): UpstreamIcon => ({
+          src: icon.src as string,
+          ...(typeof icon.mimeType === 'string' ? { mimeType: icon.mimeType } : {}),
+          ...(Array.isArray(icon.sizes)
+            ? { sizes: icon.sizes.filter((size): size is string => typeof size === 'string').slice(0, 16) }
+            : {}),
+          ...(icon.theme === 'light' || icon.theme === 'dark' ? { theme: icon.theme } : {}),
+        }))
+    : [];
+  const websiteUrl = typeof source.websiteUrl === 'string' ? source.websiteUrl : undefined;
+  if (icons.length === 0 && websiteUrl === undefined) return undefined;
+  return { ...(icons.length > 0 ? { icons } : {}), ...(websiteUrl !== undefined ? { websiteUrl } : {}) };
+}
+
 /** Events a connector emits while connected. */
 export interface ConnectorEvents {
   /** The server announced that its tool list changed. */
@@ -60,6 +97,8 @@ export interface ConnectorEvents {
 export interface Connector extends Pick<EventEmitter<ConnectorEvents>, 'on' | 'off' | 'once'> {
   /** The protocol version negotiated with the server, once connected. */
   readonly protocolVersion: string | undefined;
+  /** What the server said about itself that MCPier uses (its logo and website), once connected. */
+  readonly serverInfo: UpstreamServerInfo | undefined;
   /** Connects; rejects with `ConnectError` (already explained for the user) on failure. */
   connect(): Promise<void>;
   listTools(): Promise<ToolListing>;

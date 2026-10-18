@@ -115,6 +115,16 @@ server
   .option('--url <url>', 'remote server URL (Streamable HTTP)')
   .option('--oauth', 'the remote server signs in with OAuth')
   .option(
+    '--scope <scope>',
+    'OAuth scope to request, repeatable (a value with spaces is split); exactly these are requested. Implies --oauth',
+    collect,
+  )
+  .option('--client-id <id>', "OAuth client ID registered in the provider's console. Implies --oauth")
+  .option(
+    '--client-secret <secret:name>',
+    'its client secret, only as a reference (store it first with: mcpier secret set <name>). Implies --oauth',
+  )
+  .option(
     '--header <"Name: value">',
     'request header, repeatable; the value may be "Bearer secret:<name>"',
     collect,
@@ -133,6 +143,8 @@ Examples (Git Bash):
   mcpier server add github --env GITHUB_PERSONAL_ACCESS_TOKEN=secret:github-token -- "C:\\tools\\github-mcp-server.exe" stdio
   mcpier server add github-remote --url <url from the server's README> --header "Authorization: Bearer secret:github-token"
   mcpier server add notion --url <url from the server's README> --oauth
+  mcpier secret set linear-client-secret
+  mcpier server add linear --url <url> --client-id <id> --client-secret secret:linear-client-secret --scope read --scope write
 
 Git Bash turns arguments that start with "/" into paths. For "cmd /c …" commands, run
 the command with MSYS_NO_PATHCONV=1 in front, or import the server from a JSON file.`,

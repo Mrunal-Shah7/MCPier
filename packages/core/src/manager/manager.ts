@@ -5,6 +5,7 @@ import {
   splitFullToolName,
   type McpierConfig,
   type ServerEntry,
+  type ServerIconInfo,
   type ServerStatus,
   type ServerStatusInfo,
   type ServerSummary,
@@ -22,6 +23,7 @@ import {
   type CallOptions,
   type CallToolResult,
   type InputRequiredOutcome,
+  type UpstreamServerInfo,
 } from '../upstream/types.js';
 import { catalogEntries } from './catalog.js';
 import { ConnectionTests } from './connection-test.js';
@@ -85,6 +87,7 @@ export class ServerManager extends EventEmitter<ManagerEvents> {
   private settings: Settings | undefined;
   private readonly timing: ManagerTiming;
   private readonly connectionTests: ConnectionTests;
+  private iconInfo: ((name: string) => ServerIconInfo | undefined) | undefined;
 
   constructor(private readonly options: ServerManagerOptions) {
     super();
@@ -258,6 +261,21 @@ export class ServerManager extends EventEmitter<ManagerEvents> {
     return this.runtime(name).pid;
   }
 
+  /** The logo and website a server named when it last connected (undefined before that). */
+  serverInfo(name: string): UpstreamServerInfo | undefined {
+    return this.runtimes.get(name)?.serverInfo;
+  }
+
+  /** The entry a server runs with. */
+  entry(name: string): ServerEntry {
+    return this.runtime(name).entry;
+  }
+
+  /** Where summaries get each server's icon state from (the gateway's icon service). */
+  setIconInfo(provider: (name: string) => ServerIconInfo | undefined): void {
+    this.iconInfo = provider;
+  }
+
   summary(name: string): ServerSummary {
     const runtime = this.runtime(name);
     const tools = this.toolsOf(runtime);
@@ -270,6 +288,8 @@ export class ServerManager extends EventEmitter<ManagerEvents> {
     };
     if (runtime.entry.description) summary.description = runtime.entry.description;
     if (runtime.protocolVersion) summary.protocolVersion = runtime.protocolVersion;
+    const icon = this.iconInfo?.(runtime.name);
+    if (icon) summary.icon = icon;
     const uptime = runtime.uptimeSeconds;
     if (uptime !== undefined) summary.uptimeSeconds = uptime;
     return summary;

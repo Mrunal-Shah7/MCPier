@@ -8,6 +8,8 @@ export interface ServerStatusInfo {
   state: ServerStatus;
   /** Short human-readable detail: the last error, the missing secret name, and so on. */
   detail?: string;
+  /** The readable sentence inside `detail` (`cleanErrorMessage`), only when it differs from it. */
+  detailMessage?: string;
   /** When the server entered this status (ISO 8601). */
   since: string;
 }
@@ -23,6 +25,26 @@ export interface ServerSummary {
   tools: { total: number; enabled: number };
   /** Seconds since the current connection became ready (only while ready). */
   uptimeSeconds?: number;
+  /** The server's cached logo (`GET /api/servers/:name/icon`). */
+  icon?: ServerIconInfo;
+}
+
+/**
+ * Where a server's logo came from, in order of preference: the entry's `icon` field, the
+ * server's own `serverInfo.icons`, the favicon of its `serverInfo.websiteUrl`, or the favicon of
+ * its URL's site (HTTP servers).
+ */
+export const ICON_SOURCES = ['config', 'server', 'website', 'domain'] as const;
+export type IconSource = (typeof ICON_SOURCES)[number];
+
+export interface ServerIconInfo {
+  /** An icon is cached and served; otherwise the dashboard draws the letter tile. */
+  available: boolean;
+  source?: IconSource;
+  /** Changes whenever the icon does: added as `?v=` to bust the browser's cache. */
+  etag?: string;
+  /** Present when the server gave separate light and dark icons. */
+  themes?: ('light' | 'dark')[];
 }
 
 /** One tool in the catalog. */

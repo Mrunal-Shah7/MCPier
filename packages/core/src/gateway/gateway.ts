@@ -22,6 +22,8 @@ import { defaultWebRoot, projectVersion } from '../version.js';
 import { createApp } from './app.js';
 import { GatewayEventHub } from './events.js';
 import { HandoffCodes } from './handoff.js';
+import { IconFetcher, type IconFetch } from '../icons/fetcher.js';
+import { IconService } from '../icons/service.js';
 import { McpEndpoint, type SessionLimits } from './mcp-endpoint.js';
 
 /** The only address the gateway ever binds to. */
@@ -64,6 +66,11 @@ export interface GatewayOptions {
   oauth?: { refreshMarginMs?: number };
   /** Call log tuning (tests): flush and sweep intervals, a failing database opener. */
   callLog?: { flushIntervalMs?: number; sweepIntervalMs?: number; opener?: DatabaseOpener };
+  /**
+   * Icon fetching (tests only): a fake network, shorter timeouts, and plain `http` to loopback
+   * fixture hosts. The real gateway process never sets any of these.
+   */
+  icons?: { fetchFn?: IconFetch; allowLoopbackHttp?: boolean; timeoutMs?: number };
 }
 
 export interface RunningGateway {
@@ -90,6 +97,8 @@ export interface RunningGateway {
   readonly oauth: OAuthService;
   /** The call and search log (absent when `mcpier.db` could not be used). */
   readonly callLog: CallLog | undefined;
+  /** Server logos: discovery, the cache and the files the icon route serves. */
+  readonly icons: IconService;
   /** The address the server is bound to. */
   address(): AddressInfo;
   /** Stops the gateway cleanly: every server first, then the HTTP server. Safe to call twice. */
@@ -255,6 +264,23 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
     const events = new GatewayEventHub(manager, configService, oauth, store.callLog);
     const handoff = new HandoffCodes(options.now);
 
+    // Server logos, fetched in the background: never with the server's headers or tokens.
+    const icons = new IconService({
+      dir: paths.iconsDir,
+      fetcher: new IconFetcher({ userAgent: `MCPier/${version}`, ...options.icons }),
+      logger,
+      ...(options.now ? { now: options.now } : {}),
+    });
+    manager.setIconInfo((name) => icons.info(name));
+    icons.on('changed', (name) => events.iconChanged(name));
+    manager.on('status', (name, info) => {
+      if (!manager.has(name)) return;
+      const entry = manager.entry(name);
+      if (info.state === 'ready') void icons.consider(entry, manager.serverInfo(name), 'ready');
+      else if (info.state === 'needs_auth' || info.state === 'error')
+        void icons.consider(entry, undefined, 'not_ready');
+    });
+
     const startedAt = new Date();
     let stopPromise: Promise<void> | undefined;
     let resolveStopped!: () => void;
@@ -300,6 +326,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
         events,
         handoff,
         oauth,
+        icons,
         ...(store.callLog ? { callLog: store.callLog } : {}),
         heartbeatMs: options.eventHeartbeatMs ?? EVENT_HEARTBEAT_MS,
         autostart: () => readAutostartStatus(options.platform.autostart),
@@ -326,7 +353,17 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
     logger.info({ version, port, dataDir: paths.dir }, 'Gateway started');
 
     let retentionDays = configService.config.settings.logRetentionDays;
+    let iconFields = new Map(configService.config.servers.map((entry) => [entry.name, entry.icon]));
     configService.on('applied', (config) => {
+      // A removed server's icons go; a changed `icon` field is fetched again at once.
+      const next = new Map(config.servers.map((entry) => [entry.name, entry.icon]));
+      for (const name of iconFields.keys()) if (!next.has(name)) icons.remove(name);
+      for (const entry of config.servers) {
+        if (iconFields.has(entry.name) && iconFields.get(entry.name) !== entry.icon) {
+          void icons.consider(entry, manager.serverInfo(entry.name), 'config');
+        }
+      }
+      iconFields = next;
       // A changed retention applies at once (a lower one purges now).
       if (config.settings.logRetentionDays !== retentionDays) {
         retentionDays = config.settings.logRetentionDays;
@@ -363,6 +400,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       handoff,
       oauth,
       callLog: store.callLog,
+      icons,
       stopped,
       address: () => server.address() as AddressInfo,
       stop(reason = 'requested') {
@@ -375,6 +413,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
           await mcp.close();
           meta.close();
           events.close();
+          icons.close();
           const grace = setTimeout(() => server.closeAllConnections(), options.shutdownGraceMs ?? 5000);
           configService.close();
           await manager.stopAll();

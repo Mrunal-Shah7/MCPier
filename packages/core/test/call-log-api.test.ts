@@ -410,7 +410,19 @@ describe('call_recorded', () => {
         index >= before && e.event === 'call_recorded' && (e.data as { tool: string }).tool === 'local__fail',
     )) as Record<string, unknown>;
     expect(Object.keys(event).sort()).toEqual(
-      ['at', 'bodiesStored', 'client', 'durationMs', 'era', 'id', 'outcome', 'server', 'tool'].sort(),
+      [
+        'at',
+        'bodiesStored',
+        'client',
+        'durationMs',
+        'era',
+        'estimatedTokens',
+        'id',
+        'outcome',
+        'resultBytes',
+        'server',
+        'tool',
+      ].sort(),
     );
     expect(event).toMatchObject({
       tool: 'local__fail',

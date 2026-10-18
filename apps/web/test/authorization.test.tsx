@@ -98,7 +98,9 @@ describe('Authorization section: states', () => {
     expect(part).toHaveTextContent('https://auth.example.com');
     expect(part).toHaveTextContent('Dynamic registration');
     expect(part).toHaveTextContent('dyn-1');
-    expect(part).toHaveTextContent('read offline_access');
+    // Sprint 7: granted scopes are chips.
+    expect(within(part).getByText('offline_access')).toBeInTheDocument();
+    expect(within(part).getAllByText('read').length).toBeGreaterThan(0);
     expect(part).toHaveTextContent(/Token expires\s*in (59m|1h)/);
     expect(part).toHaveTextContent('renewed automatically');
     expect(part).toHaveTextContent(/Last refresh\s*2m \d+s ago/);
@@ -164,7 +166,8 @@ describe('Authorization section: states', () => {
     (detail.config as { auth: string }).auth = 'none';
     fakeApi({ ...routes(signedIn()), 'GET /api/servers/notion': detail });
     renderApp('/servers/notion');
-    expect(await screen.findByText('Transport')).toBeInTheDocument();
+    // Sprint 7: the overview's Connection panel shows the page has loaded.
+    expect(await screen.findByRole('region', { name: 'Connection' })).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Authorization' })).toBeNull();
   });
 });

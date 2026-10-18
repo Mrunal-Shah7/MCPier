@@ -53,8 +53,10 @@ export interface EntryForm {
   oauthSecretValue: string;
   oauthSecretName: string;
   oauthExistingSecret: string;
-  /** Extra scopes, separated by spaces. */
+  /** Scopes, separated by spaces: when set, exactly these are requested. */
   oauthScopes: string;
+  /** The logo override: an https URL, an absolute path to an image, or "none" (empty: found automatically). */
+  icon: string;
 }
 
 let rowId = 1;
@@ -93,6 +95,7 @@ export function emptyForm(): EntryForm {
     oauthSecretName: '',
     oauthExistingSecret: '',
     oauthScopes: '',
+    icon: '',
   };
 }
 
@@ -157,6 +160,7 @@ function buildMap(
 export function buildEntry(form: EntryForm, purpose: 'save' | 'test'): BuiltEntry {
   const entry: Record<string, unknown> = { name: form.name.trim(), transport: form.transport };
   if (form.description.trim()) entry.description = form.description.trim();
+  if (form.icon.trim()) entry.icon = form.icon.trim();
   let secrets: SecretToStore[];
   if (form.transport === 'stdio') {
     entry.command = form.command.trim();
@@ -273,6 +277,7 @@ export function formFromEntry(entry: ServerEntry): EntryForm {
     ...base,
     name: entry.name,
     description: entry.description ?? '',
+    icon: entry.icon ?? '',
     transport: entry.transport,
     ...(entry.transport === 'stdio'
       ? { command: entry.command, args: [...entry.args], env: rows(entry.env, 'env') }
@@ -346,6 +351,16 @@ export function entryFromCandidate(
       sensitive.location === 'header' ? splitScheme(original) : { scheme: undefined, token: original };
     map[sensitive.key] = `${scheme ? `${scheme} ` : ''}secret:${secretName}`;
     secrets.push({ name: secretName, value: token });
+  }
+  // A plain OAuth client secret: the preview named its secret (D-031); store the pasted value
+  // under that name before saving. A connection test runs discovery only and needs no secret.
+  const planned = candidate.oauth?.clientSecret;
+  if (planned?.kind === 'plain' && planned.movedTo && purpose === 'save') {
+    const block = [source?.oauth, source?.auth].find(
+      (value): value is Record<string, unknown> => typeof value === 'object' && value !== null,
+    );
+    const value = block?.clientSecret ?? block?.client_secret;
+    if (typeof value === 'string' && value) secrets.push({ name: planned.movedTo, value });
   }
   return { entry, secrets };
 }

@@ -12,6 +12,10 @@ export const API_PATHS = {
   serverAction: (name: string, action: ServerAction) => `/api/servers/${encodeURIComponent(name)}/${action}`,
   serverLogs: (name: string) => `/api/servers/${encodeURIComponent(name)}/logs`,
   serverLogStream: (name: string) => `/api/servers/${encodeURIComponent(name)}/logs/stream`,
+  /** `GET [?theme=light|dark]`: the cached logo (404 without one). */
+  serverIcon: (name: string) => `/api/servers/${encodeURIComponent(name)}/icon`,
+  /** `POST`: fetch the logo again now, ignoring the cache timers. */
+  serverIconRefresh: (name: string) => `/api/servers/${encodeURIComponent(name)}/icon/refresh`,
   import: '/api/import',
   tools: '/api/tools',
   toolSearch: '/api/tools/search',
@@ -45,6 +49,15 @@ export interface ServerResponse {
   server: ServerSummary;
 }
 
+/**
+ * `PUT /api/servers/:name`: the whole entry replaces the stored one. Keys left out are
+ * removed; keys MCPier does not use are kept and listed in `warnings`. The name cannot change.
+ */
+export interface ServerReplaceResponse extends ServerResponse {
+  /** One line per key MCPier does not use: `<key>: not used by MCPier`. */
+  warnings: string[];
+}
+
 /** `DELETE /api/servers/:name` */
 export interface ServerRemovedResponse {
   removed: string;
@@ -62,6 +75,8 @@ export interface ServerLogResponse {
 export const ImportRequestSchema = z.object({
   source: z.unknown(),
   dryRun: z.boolean().optional(),
+  /** Refuse (per entry) instead of moving a plain OAuth client secret into a secret. */
+  keepSecrets: z.boolean().optional(),
 });
 export type ImportRequest = z.infer<typeof ImportRequestSchema>;
 

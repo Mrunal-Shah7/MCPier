@@ -1,6 +1,6 @@
 {
   "name": "@mcpier/test-fixtures",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Fake MCP servers (stdio, stateless HTTP, legacy-session HTTP) used by tests.",
   "type": "module",

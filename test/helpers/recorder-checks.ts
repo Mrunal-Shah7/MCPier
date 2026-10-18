@@ -14,6 +14,7 @@ const CALL_KEYS = [
   'traceId',
   'arguments',
   'result',
+  'resultBytes',
   'errorText',
 ];
 const SEARCH_KEYS = [
@@ -26,6 +27,7 @@ const SEARCH_KEYS = [
   'resultCount',
   'results',
   'durationMs',
+  'resultBytes',
 ];
 
 /**

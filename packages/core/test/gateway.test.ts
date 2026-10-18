@@ -54,7 +54,7 @@ describe('gateway HTTP surface', () => {
   it('answers /healthz without a token, with nothing sensitive', async () => {
     const response = await httpRequest(t.port, { path: '/healthz' });
     expect(response.status).toBe(200);
-    expect(response.json()).toEqual({ service: 'mcpier', version: '1.0.0', status: 'ok' });
+    expect(response.json()).toEqual({ service: 'mcpier', version: '1.1.0', status: 'ok' });
   });
 
   it('rejects /api/status without a token', async () => {
@@ -86,7 +86,7 @@ describe('gateway HTTP surface', () => {
     expect(response.status).toBe(200);
     const status = response.json<Record<string, unknown>>();
     expect(status).toMatchObject({
-      version: '1.0.0',
+      version: '1.1.0',
       pid: process.pid,
       port: t.port,
       dataDir: t.home.dir,

@@ -1,8 +1,11 @@
 import { useMutation } from '@tanstack/react-query';
 import { DASHBOARD_API_PATHS, type ConnectionTestResponse } from '@mcpier/shared';
-import { CheckCircle2Icon, LoaderCircleIcon, XCircleIcon } from 'lucide-react';
+import { LoaderCircleIcon, LockIcon, PlayIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { ErrorMessage } from '@/components/common';
+import { ErrorBlock } from '@/components/error-block';
+import { KeyValues, Panel, PanelBody, PanelHeader } from '@/components/kit';
+import { Chip, ToneBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 
 export function useConnectionTest() {
@@ -12,29 +15,58 @@ export function useConnectionTest() {
   });
 }
 
-/** A "Test connection" button and its result: tools and protocol, or the error with stderr. */
+/** The rail's "Connection test": connects to the unsaved entry, lists its tools, disconnects. */
 export function ConnectionTest({
   entry,
   disabled,
+  bare = false,
 }: {
   entry: () => Record<string, unknown>;
   disabled?: boolean;
+  /** Without its own panel (inside a pasted entry's card). */
+  bare?: boolean;
 }) {
   const test = useConnectionTest();
-  return (
-    <div className="space-y-3">
-      <Button
-        type="button"
-        variant="outline"
-        disabled={disabled || test.isPending}
-        onClick={() => test.mutate(entry())}
-      >
-        {test.isPending ? <LoaderCircleIcon className="animate-spin" aria-hidden="true" /> : null}
-        {test.isPending ? 'Testing…' : 'Test connection'}
-      </Button>
+  const button = (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      disabled={disabled || test.isPending}
+      onClick={() => test.mutate(entry())}
+    >
+      {test.isPending ? (
+        <LoaderCircleIcon className="animate-spin" aria-hidden="true" />
+      ) : (
+        <PlayIcon aria-hidden="true" />
+      )}
+      {test.isPending ? 'Testing…' : 'Test connection'}
+    </Button>
+  );
+  const body = (
+    <>
       {test.error ? <ErrorMessage error={test.error} title="The test could not run" /> : null}
       {test.data ? <ConnectionTestResult result={test.data} /> : null}
-    </div>
+      {!test.error && !test.data && !bare ? (
+        <p className="text-muted-foreground m-0 text-sm">
+          Connects, lists the tools, disconnects. Nothing is saved.
+        </p>
+      ) : null}
+    </>
+  );
+  if (bare) {
+    return (
+      <div className="space-y-3">
+        {button}
+        {body}
+      </div>
+    );
+  }
+  return (
+    <Panel aria-label="Connection test">
+      <PanelHeader title="Connection test" actions={button} />
+      <PanelBody className="space-y-3">{body}</PanelBody>
+    </Panel>
   );
 }
 
@@ -49,37 +81,49 @@ function DiscoveryResult({ result }: { result: ConnectionTestResponse }) {
   const discovery = result.discovery!;
   const found = (yes: boolean) => (yes ? 'found' : 'not found');
   return (
-    <div
-      role={result.ok ? 'status' : 'alert'}
-      className={`rounded-md border p-3 text-sm ${result.ok ? 'border-emerald-600/30' : 'border-destructive/40'}`}
-    >
-      <p className="flex items-center gap-2 font-medium">
-        {result.ok ? (
-          <CheckCircle2Icon className="size-4 text-emerald-600" aria-hidden="true" />
-        ) : (
-          <XCircleIcon className="text-destructive size-4" aria-hidden="true" />
-        )}
+    <div role={result.ok ? 'status' : 'alert'} className="space-y-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <ToneBadge tone={result.ok ? 'ok' : 'warn'}>
+          {result.ok ? 'Discovery worked' : 'Discovery incomplete'}
+        </ToneBadge>
+        <span className="text-faint text-xs">{result.durationMs} ms</span>
+      </div>
+      <p className="m-0">
         {result.ok
-          ? `OAuth discovery worked: save the server, then sign in from its page (${result.durationMs} ms)`
-          : `OAuth discovery did not find everything (${result.durationMs} ms)`}
+          ? 'OAuth discovery worked: save the server, then sign in from its page.'
+          : 'OAuth discovery did not find everything.'}
       </p>
-      <ul className="mt-2 space-y-1">
-        <li>Protected-resource metadata: {found(discovery.protectedResourceMetadata)}</li>
-        <li>
-          Authorization server: {discovery.authorizationServer ?? '—'} (metadata{' '}
-          {found(discovery.authorizationServerMetadata)})
-        </li>
-        {discovery.registrationMethod ? (
-          <li>Sign-in would use {METHOD_LABELS[discovery.registrationMethod]}.</li>
-        ) : null}
-        {discovery.scopesSupported?.length ? (
-          <li>
-            Scopes offered: <span className="font-mono text-xs">{discovery.scopesSupported.join(' ')}</span>
-          </li>
-        ) : null}
-      </ul>
+      <KeyValues
+        rows={[
+          ['Resource metadata', found(discovery.protectedResourceMetadata)],
+          [
+            'Authorization server',
+            <span className="font-mono text-xs">
+              {discovery.authorizationServer ?? '—'} ({found(discovery.authorizationServerMetadata)})
+            </span>,
+          ],
+          [
+            'Sign-in',
+            discovery.registrationMethod ? `Would use ${METHOD_LABELS[discovery.registrationMethod]}` : '—',
+          ],
+          [
+            'Scopes offered',
+            discovery.scopesSupported?.length ? (
+              <span className="flex flex-wrap gap-1.5">
+                {discovery.scopesSupported.map((scope) => (
+                  <Chip key={scope} className="font-mono">
+                    {scope}
+                  </Chip>
+                ))}
+              </span>
+            ) : (
+              '—'
+            ),
+          ],
+        ]}
+      />
       {(result.error ?? discovery.note) ? (
-        <p className="mt-2 whitespace-pre-line">{result.error ?? discovery.note}</p>
+        <p className="wrap-anywhere m-0 whitespace-pre-line">{result.error ?? discovery.note}</p>
       ) : null}
     </div>
   );
@@ -88,33 +132,56 @@ function DiscoveryResult({ result }: { result: ConnectionTestResponse }) {
 export function ConnectionTestResult({ result }: { result: ConnectionTestResponse }) {
   if (result.discovery) return <DiscoveryResult result={result} />;
   if (result.ok) {
+    const shown = result.tools.names.slice(0, 8);
     return (
-      <div role="status" className="rounded-md border border-emerald-600/30 p-3 text-sm">
-        <p className="flex items-center gap-2 font-medium">
-          <CheckCircle2Icon className="size-4 text-emerald-600" aria-hidden="true" />
+      <div role="status" className="space-y-3 text-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <ToneBadge tone="ok">Connected</ToneBadge>
+          <span className="text-faint text-xs">{result.durationMs} ms</span>
+        </div>
+        <p className="m-0">
           Connected: {result.tools.count} {result.tools.count === 1 ? 'tool' : 'tools'}, protocol{' '}
           {result.protocolVersion ?? 'unknown'}, in {result.durationMs} ms
         </p>
-        {result.tools.names.length > 0 ? (
-          <p className="text-muted-foreground mt-1 font-mono text-xs break-words">
-            {result.tools.names.join(', ')}
-          </p>
+        {shown.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {shown.map((name) => (
+              <Chip key={name} className="font-mono">
+                {name}
+              </Chip>
+            ))}
+            {result.tools.names.length > shown.length ? (
+              <span className="text-faint text-xs">+{result.tools.names.length - shown.length}</span>
+            ) : null}
+          </div>
         ) : null}
       </div>
     );
   }
   return (
-    <div role="alert" className="border-destructive/40 rounded-md border p-3 text-sm">
-      <p className="flex items-center gap-2 font-medium">
-        <XCircleIcon className="text-destructive size-4" aria-hidden="true" />
-        {result.needsAuth ? 'Sign-in needed' : 'Connection failed'} ({result.durationMs} ms)
-      </p>
-      {result.error ? <p className="mt-1 whitespace-pre-line">{result.error}</p> : null}
+    <div role="alert" className="space-y-2 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <ToneBadge tone={result.needsAuth ? 'warn' : 'bad'}>
+          {result.needsAuth ? 'Sign-in needed' : 'Connection failed'}
+        </ToneBadge>
+        <span className="text-faint text-xs">{result.durationMs} ms</span>
+      </div>
+      {result.error ? <ErrorBlock message={result.error} /> : null}
       {result.stderr && result.stderr.length > 0 ? (
-        <pre className="bg-muted mt-2 max-h-48 overflow-auto rounded p-2 font-mono text-xs whitespace-pre-wrap">
+        <pre className="wrap-anywhere bg-panel-2 max-h-48 overflow-y-auto rounded-lg border p-2 font-mono text-xs whitespace-pre-wrap">
           {result.stderr.join('\n')}
         </pre>
       ) : null}
     </div>
+  );
+}
+
+/** The rail's note under the connection test. */
+export function SecretsNote() {
+  return (
+    <p className="text-faint flex items-center gap-1.5 text-xs">
+      <LockIcon aria-hidden="true" className="size-3.5" />
+      Values marked as secrets go to Credential Manager before saving.
+    </p>
   );
 }

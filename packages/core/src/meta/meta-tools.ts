@@ -9,6 +9,7 @@ import { traceMetaOf } from '../upstream/client.js';
 import { ConflictError, NotFoundError } from '../manager/errors.js';
 import type { ServerManager } from '../manager/manager.js';
 import {
+  resultByteSize,
   traceIdOf,
   type CallOutcomeKind,
   type ClientEra,
@@ -154,7 +155,8 @@ export function searchTools(ctx: MetaToolContext, input: SearchToolsInput, calle
   const started = performance.now();
   const query = (input.query ?? '').trim();
   const limit = Math.min(Math.max(Math.trunc(input.limit ?? SEARCH_LIMIT_DEFAULT), 1), SEARCH_LIMIT_MAX);
-  const record = (names: string[]) =>
+  // Recorded with the size of exactly what is returned, so every path records its own result.
+  const record = (names: string[], result: CallToolResult): CallToolResult => {
     ctx.recorder.searchPerformed({
       at: new Date().toISOString(),
       client: caller.client,
@@ -165,24 +167,31 @@ export function searchTools(ctx: MetaToolContext, input: SearchToolsInput, calle
       resultCount: names.length,
       results: names,
       durationMs: Math.round(performance.now() - started),
+      resultBytes: resultByteSize(result),
     });
+    return result;
+  };
 
   if (input.server !== undefined) {
     const enabled = ctx.manager.summaries().filter((server) => server.enabled);
     if (!enabled.some((server) => server.name === input.server)) {
-      record([]);
       const known = ctx.manager.has(input.server);
-      return text(
-        known
-          ? `The server "${input.server}" is disabled in MCPier. Its tools cannot be searched or called until the user enables it.`
-          : `There is no server named "${input.server}". Valid server names: ${enabled.map((server) => server.name).join(', ') || '(none)'}.`,
-        true,
+      return record(
+        [],
+        text(
+          known
+            ? `The server "${input.server}" is disabled in MCPier. Its tools cannot be searched or called until the user enables it.`
+            : `There is no server named "${input.server}". Valid server names: ${enabled.map((server) => server.name).join(', ') || '(none)'}.`,
+          true,
+        ),
       );
     }
   }
   if (!query && input.server === undefined) {
-    record([]);
-    return text('Give a query (what you want to do), or call list_servers to see what is connected.', true);
+    return record(
+      [],
+      text('Give a query (what you want to do), or call list_servers to see what is connected.', true),
+    );
   }
 
   const hits = ctx.search.search({ query, limit, ...(input.server ? { server: input.server } : {}) });
@@ -201,8 +210,6 @@ export function searchTools(ctx: MetaToolContext, input: SearchToolsInput, calle
       ...(hit.available ? {} : { serverStatus: hit.serverStatus }),
     };
   });
-  record(matches.map((match) => match.name));
-
   const blocks = matches.map((match) => {
     const hints = [match.readOnlyHint && 'read-only', match.destructiveHint && 'destructive'].filter(Boolean);
     const availability = match.available
@@ -220,10 +227,13 @@ export function searchTools(ctx: MetaToolContext, input: SearchToolsInput, calle
     matches.length === 0
       ? `No tools match "${query}"${input.server ? ` on ${input.server}` : ''}. Try other words, or call list_servers.`
       : `${matches.length} tool${matches.length === 1 ? '' : 's'}${query ? ` for "${query}"` : ` on ${input.server}`}. Call one with call_tool { "name": "<name>", "arguments": { … } }.\n\n${blocks.join('\n\n')}`;
-  return {
-    content: [{ type: 'text', text: summary }],
-    structuredContent: { query, results: matches } as unknown as Record<string, unknown>,
-  };
+  return record(
+    matches.map((match) => match.name),
+    {
+      content: [{ type: 'text', text: summary }],
+      structuredContent: { query, results: matches } as unknown as Record<string, unknown>,
+    },
+  );
 }
 
 // ---- call_tool
@@ -248,13 +258,16 @@ export function recordedBodies(
   server: string | undefined,
   args: Record<string, unknown>,
   result: unknown,
-): { arguments: unknown; result: unknown } {
+): { arguments: unknown; result: unknown; resultBytes: number } {
   const redact = (value: unknown) =>
     server ? redactDeep(value, (text) => ctx.manager.redactFor(server, text)) : value;
   const shown = isInputRequired(result)
     ? { resultType: result.resultType, inputRequests: result.inputRequests }
     : result;
-  return { arguments: redact(args), result: redact(shown) };
+  const redacted = redact(shown);
+  // Measured here, on what the caller received (redacted), before the body cap and whether or
+  // not bodies are stored.
+  return { arguments: redact(args), result: redacted, resultBytes: resultByteSize(redacted) };
 }
 
 export interface CallToolInput {

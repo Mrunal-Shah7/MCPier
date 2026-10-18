@@ -148,13 +148,16 @@ describe('Add server: form', () => {
     await user.type(screen.getByLabelText('Environment variable 1 value'), 'typed-value');
     await user.click(screen.getByRole('button', { name: 'Test connection' }));
     expect(await screen.findByText(/Connected: 2 tools, protocol 2025-11-25, in 321 ms/)).toBeInTheDocument();
-    expect(screen.getByText('echo, add')).toBeInTheDocument();
+    // Sprint 7: tool names are chips; the badge and the duration are separate.
+    expect(screen.getByText('echo')).toBeInTheDocument();
+    expect(screen.getByText('add')).toBeInTheDocument();
     expect(tested).toMatchObject({ name: 'probe', command: 'node', env: { API_KEY: 'typed-value' } });
 
     ok = false;
     await user.click(screen.getByRole('button', { name: 'Test connection' }));
-    const failure = await screen.findByText('Connection failed (40 ms)');
+    const failure = await screen.findByText('Connection failed');
     const box = failure.closest('[role="alert"]')!;
+    expect(box).toHaveTextContent('40 ms');
     expect(box).toHaveTextContent('The server exited (code 3).');
     expect(box).toHaveTextContent('boom [value:API_KEY]');
   });
@@ -216,7 +219,7 @@ describe('Add server: paste JSON', () => {
 
     expect(await screen.findByText('files: not imported')).toBeInTheDocument();
     expect(screen.getByText('A server named "files" already exists.')).toBeInTheDocument();
-    const card = screen.getByText('github', { selector: 'p' }).closest('[data-candidate]') as HTMLElement;
+    const card = screen.getByText('github', { selector: 'b' }).closest('[data-candidate]') as HTMLElement;
     expect(within(card).getByText('Ignored fields: autoApprove')).toBeInTheDocument();
     expect(within(card).getByText(/looks like a credential/)).toBeInTheDocument();
     expect(

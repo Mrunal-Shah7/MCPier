@@ -79,4 +79,30 @@ describe('dashboard source', () => {
       expect(text, file).not.toMatch(/['"]authorization['"]\s*:/i);
     }
   });
+
+  // Sprint 7: the refresh keeps every style in the built stylesheet. Charts, bars and tiles use
+  // SVG attributes and classes; nothing sets a style, a custom property or markup at run time.
+  it('sets no style attribute, style prop, custom property or raw HTML', () => {
+    for (const file of files(src).filter((name) => /\.(ts|tsx)$/.test(name))) {
+      // Code only: comments may name what is avoided.
+      const text = readFileSync(file, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '');
+      expect(text, file).not.toMatch(/\bstyle\s*=\s*[{"']/);
+      expect(text, file).not.toMatch(/dangerouslySetInnerHTML|\.innerHTML\s*=|insertAdjacentHTML/);
+      expect(text, file).not.toMatch(/\.style\.(setProperty|cssText)|\.style\[/);
+      expect(text, file).not.toMatch(/['"]--[a-z][\w-]*['"]\s*:/);
+      expect(text, file).not.toMatch(/<style\b|createElement\(\s*["']style["']\s*\)/);
+      expect(text, file).not.toMatch(/\beval\s*\(|new\s+Function\s*\(/);
+    }
+  });
+
+  it('never refers to the design reference file', () => {
+    for (const file of files(src)) {
+      expect(readFileSync(file, 'utf8'), file).not.toMatch(/mcpier-design-preview|docs\/design/);
+    }
+    if (existsSync(dist)) {
+      for (const file of files(dist)) expect(file).not.toMatch(/design-preview/);
+    }
+  });
 });

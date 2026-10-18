@@ -70,3 +70,4 @@ export function openGatewayStore(options: OpenStoreOptions): GatewayStore {
 export * from './call-log.js';
 export * from './database.js';
 export * from './tool-cache.js';
+export * from './usage.js';

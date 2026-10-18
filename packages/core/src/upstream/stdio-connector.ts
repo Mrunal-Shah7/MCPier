@@ -22,7 +22,9 @@ import {
   type Connector,
   type ConnectorEvents,
   type ToolListing,
+  pickServerInfo,
   type UpstreamCallResult,
+  type UpstreamServerInfo,
 } from './types.js';
 
 /** How long a stopped server gets to exit by itself before its process tree is stopped. */
@@ -67,6 +69,10 @@ export class StdioConnector extends EventEmitter<ConnectorEvents> implements Con
 
   get protocolVersion(): string | undefined {
     return this.running?.client.getNegotiatedProtocolVersion();
+  }
+
+  get serverInfo(): UpstreamServerInfo | undefined {
+    return pickServerInfo(this.running?.client.getServerVersion());
   }
 
   get pid(): number | undefined {

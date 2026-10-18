@@ -8,6 +8,7 @@ import { createQueryClient, useStatus } from '@/lib/queries';
 import { ErrorMessage, LoadingRows } from '@/components/common';
 import { Layout } from '@/components/layout';
 import { ToastProvider } from '@/components/toaster';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { NotSignedIn } from '@/pages/not-signed-in';
 import { ServersPage } from '@/pages/servers';
 import { ServerDetailPage } from '@/pages/server-detail';
@@ -18,6 +19,7 @@ import { ConnectPage } from '@/pages/connect';
 import { SettingsPage } from '@/pages/settings';
 import { CallLogPage } from '@/pages/call-log';
 import { TesterPage } from '@/pages/tester';
+import { UsagePage } from '@/pages/usage';
 
 /** Everything below the auth check: live updates, the layout and the pages. */
 function SignedIn({ onSignedOut }: { onSignedOut: () => void }) {
@@ -34,6 +36,7 @@ function SignedIn({ onSignedOut }: { onSignedOut: () => void }) {
         <Route path="/servers/:name/edit" element={<EditServerPage />} />
         <Route path="/tools" element={<ToolsPage />} />
         <Route path="/calls" element={<CallLogPage />} />
+        <Route path="/usage" element={<UsagePage />} />
         <Route path="/tester" element={<TesterPage />} />
         <Route path="/secrets" element={<SecretsPage />} />
         <Route path="/connect" element={<ConnectPage />} />
@@ -84,7 +87,9 @@ export function Providers({
   return (
     <QueryClientProvider client={client}>
       <LiveEventsProvider events={events}>
-        <ToastProvider>{children}</ToastProvider>
+        <TooltipProvider delayDuration={150}>
+          <ToastProvider>{children}</ToastProvider>
+        </TooltipProvider>
       </LiveEventsProvider>
     </QueryClientProvider>
   );

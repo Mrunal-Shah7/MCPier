@@ -41,6 +41,8 @@ const STATUS_KEYS = [
   'lastRefreshAt',
   'signedInAt',
   'pending',
+  'nextScopes',
+  'scopesChanged',
 ];
 
 function expectNoValues(status: AuthStatus): void {

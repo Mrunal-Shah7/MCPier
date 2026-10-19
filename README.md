@@ -27,20 +27,20 @@ Setting up the same MCP servers, secrets and sign-ins in every client is repetit
 - Windows 10 or later
 - [Node.js 24](https://nodejs.org/)
 - [pnpm](https://pnpm.io/)
-- Git Bash: the commands below are written for it
 
 ## Install
 
-From the repository root:
+From the repository root (Git Bash, PowerShell, or Command Prompt):
 
 ```bash
 pnpm install
 pnpm build
-pnpm add -g "link:$(pwd -W)/apps/cli"
+cd apps/cli
+pnpm add -g .
 mcpier --version
 ```
 
-The last command prints `1.1.0`. If `mcpier` is not found, run `pnpm setup` once and open a new terminal.
+The last command prints `1.1.0`. If `mcpier` is not found, run `pnpm setup` once and open a new terminal so the global bin directory is on your `PATH`.
 
 ## Quick start
 

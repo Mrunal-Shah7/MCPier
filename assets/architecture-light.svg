@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 670" width="1200" height="670" role="img" aria-labelledby="title desc">
+<title id="title">MCPier architecture</title>
+<desc id="desc">Claude Code, Claude Desktop, Codex, Cursor, VS Code and any MCP client connect to one MCPier endpoint over HTTP or the stdio bridge. MCPier connects to local stdio servers and remote Streamable HTTP servers with OAuth or header authentication.</desc>
+<rect width="1200" height="670" rx="20" fill="#ffffff"/>
+<text x="40" y="72" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" letter-spacing="1.6" fill="#57606a">CLIENTS</text>
+<text x="420" y="72" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" letter-spacing="1.6" fill="#57606a">ONE GATEWAY</text>
+<text x="920" y="72" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" letter-spacing="1.6" fill="#57606a">SERVERS</text>
+<path d="M280,148 C357.0,148 343.0,335 420,335" fill="none" stroke="#0284c7" stroke-width="2" stroke-opacity="0.75" stroke-linecap="round"/>
+<path d="M280,222 C357.0,222 343.0,335 420,335" fill="none" stroke="#7c3aed" stroke-width="2" stroke-opacity="0.75" stroke-linecap="round"/>
+<path d="M280,296 C357.0,296 343.0,335 420,335" fill="none" stroke="#7c3aed" stroke-width="2" stroke-opacity="0.75" stroke-linecap="round"/>
+<path d="M280,370 C357.0,370 343.0,335 420,335" fill="none" stroke="#0284c7" stroke-width="2" stroke-opacity="0.75" stroke-linecap="round"/>
+<path d="M280,444 C357.0,444 343.0,335 420,335" fill="none" stroke="#0284c7" stroke-width="2" stroke-opacity="0.75" stroke-linecap="round"/>
+<path d="M280,518 C357.0,518 343.0,335 420,335" fill="none" stroke="#0284c7" stroke-width="2" stroke-opacity="0.75" stroke-linecap="round"/>
+<rect x="40" y="120" width="240" height="56" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="58" y="153" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#1f2328">Claude Code</text>
+<rect x="229.2" y="138" width="36.8" height="20" rx="5" fill="#0284c7" fill-opacity="0.14" stroke="#0284c7" stroke-opacity="0.55"/><text x="247.6" y="152" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="11" font-weight="600" fill="#0284c7">HTTP</text>
+<rect x="40" y="194" width="240" height="56" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="58" y="227" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#1f2328">Claude Desktop</text>
+<rect x="222.0" y="212" width="44.0" height="20" rx="5" fill="#7c3aed" fill-opacity="0.14" stroke="#7c3aed" stroke-opacity="0.55"/><text x="244.0" y="226" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="11" font-weight="600" fill="#7c3aed">stdio</text>
+<rect x="40" y="268" width="240" height="56" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="58" y="301" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#1f2328">Codex</text>
+<rect x="222.0" y="286" width="44.0" height="20" rx="5" fill="#7c3aed" fill-opacity="0.14" stroke="#7c3aed" stroke-opacity="0.55"/><text x="244.0" y="300" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="11" font-weight="600" fill="#7c3aed">stdio</text>
+<rect x="40" y="342" width="240" height="56" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="58" y="375" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#1f2328">Cursor</text>
+<rect x="229.2" y="360" width="36.8" height="20" rx="5" fill="#0284c7" fill-opacity="0.14" stroke="#0284c7" stroke-opacity="0.55"/><text x="247.6" y="374" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="11" font-weight="600" fill="#0284c7">HTTP</text>
+<rect x="40" y="416" width="240" height="56" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="58" y="449" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#1f2328">VS Code</text>
+<rect x="229.2" y="434" width="36.8" height="20" rx="5" fill="#0284c7" fill-opacity="0.14" stroke="#0284c7" stroke-opacity="0.55"/><text x="247.6" y="448" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="11" font-weight="600" fill="#0284c7">HTTP</text>
+<rect x="40" y="490" width="240" height="56" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="58" y="523" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#1f2328">Any MCP client</text>
+<rect x="229.2" y="508" width="36.8" height="20" rx="5" fill="#0284c7" fill-opacity="0.14" stroke="#0284c7" stroke-opacity="0.55"/><text x="247.6" y="522" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="11" font-weight="600" fill="#0284c7">HTTP</text>
+<path d="M780,335 C857.0,335 843.0,152 920,152" fill="none" stroke="#7c3aed" stroke-width="2" stroke-opacity="0.75" stroke-linecap="round"/>
+<path d="M780,335 C857.0,335 843.0,210 920,210" fill="none" stroke="#7c3aed" stroke-width="2" stroke-opacity="0.75" stroke-linecap="round"/>
+<path d="M780,335 C857.0,335 843.0,268 920,268" fill="none" stroke="#7c3aed" stroke-width="2" stroke-opacity="0.75" stroke-linecap="round"/>
+<path d="M780,335 C857.0,335 843.0,358 920,358" fill="none" stroke="#0284c7" stroke-width="2" stroke-opacity="0.75" stroke-linecap="round"/>
+<path d="M780,335 C857.0,335 843.0,416 920,416" fill="none" stroke="#0284c7" stroke-width="2" stroke-opacity="0.75" stroke-linecap="round"/>
+<path d="M780,335 C857.0,335 843.0,474 920,474" fill="none" stroke="#0284c7" stroke-width="2" stroke-opacity="0.75" stroke-linecap="round"/>
+<path d="M780,335 C857.0,335 843.0,532 920,532" fill="none" stroke="#0284c7" stroke-width="2" stroke-opacity="0.75" stroke-linecap="round"/>
+<text x="922" y="114" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#59636e">stdio · local processes</text>
+<rect x="920" y="128" width="240" height="48" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>
+<rect x="931" y="138" width="28" height="28" rx="8" fill="#f59e0b"/><path d="M938,148 h5 l2,2 h7 v8 a1,1 0 0 1 -1,1 h-12 a1,1 0 0 1 -1,-1 z" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="970" y="157" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15.5" font-weight="600" fill="#1f2328">filesystem</text>
+<rect x="1102.0" y="142" width="44.0" height="20" rx="5" fill="#7c3aed" fill-opacity="0.14" stroke="#7c3aed" stroke-opacity="0.55"/><text x="1124.0" y="156" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="11" font-weight="600" fill="#7c3aed">stdio</text>
+<rect x="920" y="186" width="240" height="48" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>
+<rect x="931" y="196" width="28" height="28" rx="8" fill="#fb923c"/><circle cx="941" cy="204.5" r="2" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="941" cy="215.5" r="2" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="949.5" cy="207" r="2" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M941,206.5 v7 M949.5,209 c0,4 -8.5,2 -8.5,4.5" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="970" y="215" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15.5" font-weight="600" fill="#1f2328">git</text>
+<rect x="1102.0" y="200" width="44.0" height="20" rx="5" fill="#7c3aed" fill-opacity="0.14" stroke="#7c3aed" stroke-opacity="0.55"/><text x="1124.0" y="214" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="11" font-weight="600" fill="#7c3aed">stdio</text>
+<rect x="920" y="244" width="240" height="48" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>
+<rect x="931" y="254" width="28" height="28" rx="8" fill="#38bdf8"/><ellipse cx="945" cy="263" rx="6" ry="2.5" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M939,263 v10 c0,3.3 12,3.3 12,0 v-10 M939,268 c0,3.3 12,3.3 12,0" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="970" y="273" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15.5" font-weight="600" fill="#1f2328">sqlite</text>
+<rect x="1102.0" y="258" width="44.0" height="20" rx="5" fill="#7c3aed" fill-opacity="0.14" stroke="#7c3aed" stroke-opacity="0.55"/><text x="1124.0" y="272" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="11" font-weight="600" fill="#7c3aed">stdio</text>
+<text x="922" y="320" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#59636e">Streamable HTTP · remote</text>
+<rect x="920" y="334" width="240" height="48" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>
+<rect x="931" y="344" width="28" height="28" rx="8" fill="#f43f5e"/><text x="945" y="363.5" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="800" fill="#ffffff">G</text>
+<text x="970" y="363" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15.5" font-weight="600" fill="#1f2328">GitHub</text>
+<rect x="1094.8" y="348" width="51.2" height="20" rx="5" fill="#59636e" fill-opacity="0.14" stroke="#59636e" stroke-opacity="0.55"/><text x="1120.4" y="362" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="11" font-weight="600" fill="#59636e">Header</text>
+<rect x="920" y="392" width="240" height="48" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>
+<rect x="931" y="402" width="28" height="28" rx="8" fill="#0ea5e9"/><text x="945" y="421.5" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="800" fill="#ffffff">N</text>
+<text x="970" y="421" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15.5" font-weight="600" fill="#1f2328">Notion</text>
+<rect x="1102.0" y="406" width="44.0" height="20" rx="5" fill="#b45309" fill-opacity="0.14" stroke="#b45309" stroke-opacity="0.55"/><text x="1124.0" y="420" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="11" font-weight="600" fill="#b45309">OAuth</text>
+<rect x="920" y="450" width="240" height="48" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>
+<rect x="931" y="460" width="28" height="28" rx="8" fill="#10b981"/><text x="945" y="479.5" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="800" fill="#ffffff">A</text>
+<text x="970" y="479" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15.5" font-weight="600" fill="#1f2328">Atlassian</text>
+<rect x="1102.0" y="464" width="44.0" height="20" rx="5" fill="#b45309" fill-opacity="0.14" stroke="#b45309" stroke-opacity="0.55"/><text x="1124.0" y="478" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="11" font-weight="600" fill="#b45309">OAuth</text>
+<rect x="920" y="508" width="240" height="48" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>
+<rect x="931" y="518" width="28" height="28" rx="8" fill="#ec4899"/><text x="945" y="537.5" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="800" fill="#ffffff">L</text>
+<text x="970" y="537" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15.5" font-weight="600" fill="#1f2328">Linear</text>
+<rect x="1102.0" y="522" width="44.0" height="20" rx="5" fill="#b45309" fill-opacity="0.14" stroke="#b45309" stroke-opacity="0.55"/><text x="1124.0" y="536" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="11" font-weight="600" fill="#b45309">OAuth</text>
+<rect x="414" y="134" width="372" height="402" rx="22" fill="none" stroke="#059669" stroke-opacity="0.25" stroke-width="6"/>
+<rect x="420" y="140" width="360" height="390" rx="18" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<circle cx="420" cy="335" r="7" fill="#059669" stroke="#ffffff" stroke-width="3"/>
+<circle cx="780" cy="335" r="7" fill="#059669" stroke="#ffffff" stroke-width="3"/>
+<rect x="444" y="164" width="40" height="40" rx="10" fill="#059669"/>
+<text x="464" y="191" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20" font-weight="800" fill="#ffffff">M</text>
+<text x="498" y="182" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="22" font-weight="800" fill="#1f2328">MCPier</text>
+<text x="498" y="201" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="12.5" fill="#059669">127.0.0.1:47800/mcp</text>
+<line x1="440" y1="224" x2="760" y2="224" stroke="#d0d7de"/>
+<circle cx="450" cy="244" r="4.5" fill="#059669"/>
+<text x="464" y="248" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2328">Meta-tools</text>
+<text x="464" y="268" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="12" fill="#59636e">search_tools · call_tool · list_servers</text>
+<circle cx="450" cy="302" r="4.5" fill="#b45309"/>
+<text x="464" y="306" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2328">Auth</text>
+<text x="464" y="326" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="12" fill="#59636e">OAuth · header tokens · secret: refs</text>
+<circle cx="450" cy="360" r="4.5" fill="#0284c7"/>
+<text x="464" y="364" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2328">Protocol</text>
+<text x="464" y="384" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="12" fill="#59636e">Stateless 2026-07-28 + legacy sessions</text>
+<circle cx="450" cy="418" r="4.5" fill="#7c3aed"/>
+<text x="464" y="422" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2328">Observability</text>
+<text x="464" y="442" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="12" fill="#59636e">Call log · usage · estimated tokens</text>
+<circle cx="450" cy="476" r="4.5" fill="#059669"/>
+<text x="464" y="480" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2328">Control</text>
+<text x="464" y="500" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace" font-size="12" fill="#59636e">Web dashboard + mcpier CLI</text>
+<line x1="40" y1="600" x2="1160" y2="600" stroke="#d0d7de"/>
+<line x1="40" y1="626" x2="66" y2="626" stroke="#0284c7" stroke-width="3" stroke-linecap="round"/>
+<text x="74" y="630" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#59636e">HTTP</text>
+<line x1="150" y1="626" x2="176" y2="626" stroke="#7c3aed" stroke-width="3" stroke-linecap="round"/>
+<text x="184" y="630" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#59636e">stdio</text>
+<text x="1160" y="630" text-anchor="end" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#59636e">Add MCPier once in each client. Add servers once in MCPier.</text>
+</svg>

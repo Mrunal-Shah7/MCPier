@@ -97,6 +97,11 @@ Already have servers in Claude Desktop or VS Code? `mcpier server import` reads 
 
 ## Install
 
+<<<<<<< HEAD
+=======
+From the repository root (Git Bash, PowerShell, or Command Prompt):
+
+>>>>>>> 0526224f404b82afd30bd0d19f1be0e9887f0d69
 ```bash
 git clone https://github.com/Mrunal-Shah7/mcpier.git
 cd mcpier
@@ -107,9 +112,13 @@ pnpm add -g .
 mcpier --version
 ```
 
+<<<<<<< HEAD
 The last command prints `1.1.0`. If `mcpier` is not found, run `pnpm setup` once and open a new terminal so pnpm's global bin directory is on your `PATH`.
 
 Commands work in Git Bash, PowerShell and Command Prompt.
+=======
+The last command prints `1.1.0`. If `mcpier` is not found, run `pnpm setup` once and open a new terminal so the global bin directory is on your `PATH`.
+>>>>>>> 0526224f404b82afd30bd0d19f1be0e9887f0d69
 
 ## Quick start
 
